@@ -13,7 +13,7 @@ jg doctor
 jg "How are telemetry events recorded and sent?" ./my-project
 ```
 
-`auth` asks for Vercel AI Gateway, TypeSafe, or OpenRouter, then saves its key in
+`auth` asks for Vercel AI Gateway, TypeSafe, OpenRouter, or Cloudflare AI Gateway, then saves its key in
 an owner-only config file. Searches use that provider until you run auth again.
 `doctor` verifies access with synthetic input and names the selected provider.
 For unattended setup, pipe the key from your secret manager to:
@@ -22,7 +22,17 @@ For unattended setup, pipe the key from your secret manager to:
 jg auth --provider openrouter --stdin
 ```
 
-Both options are required for piped setup. Credentials are saved under
+Both options are required for piped setup. Cloudflare AI Gateway also needs your
+gateway URL, saved with the token: either
+`https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY` or the gateway's custom domain.
+The token needs the account's AI Gateway Run permission; Jev is billed through
+Cloudflare Unified Billing and served on the gateway's Workers AI route.
+
+```sh
+jg auth --provider cloudflare --gateway-url https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY --stdin
+```
+
+Credentials are saved under
 `$XDG_CONFIG_HOME/jevgrep/credentials.json`, or `~/.config/jevgrep/credentials.json`.
 Existing saved records without a provider still mean Vercel, without a migration.
 API-key, endpoint, and model environment overrides are ignored; users who only

@@ -55,7 +55,20 @@ test("auth requires explicit provider for stdin and keeps provider selection out
     kind: "auth",
     provider: "openrouter",
   });
+  expect(
+    parseCommand([
+      "auth",
+      "--provider",
+      "cloudflare",
+      "--gateway-url",
+      "https://ai.example.com",
+      "--stdin",
+    ]),
+  ).toEqual({ kind: "auth", provider: "cloudflare", gatewayURL: "https://ai.example.com" });
   for (const args of [
+    ["auth", "--provider", "cloudflare", "--stdin"],
+    ["auth", "--provider", "vercel", "--gateway-url", "https://ai.example.com", "--stdin"],
+    ["query", "--gateway-url", "https://ai.example.com"],
     ["auth", "--stdin"],
     ["auth", "--provider", "vercel"],
     ["auth", "--provider", "unknown", "--stdin"],

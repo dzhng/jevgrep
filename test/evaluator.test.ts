@@ -1,6 +1,7 @@
 import { routeProviderFetch } from "./fixtures/provider-route.mjs";
 import { expect, test } from "bun:test";
 import { createEvaluator } from "../packages/core/src/evaluator";
+import { parseGatewayURL } from "../packages/core/src/providers";
 
 test("Jev uses native state and validated boolean probabilities through real HTTP", async () => {
   const state = {
@@ -325,3 +326,136 @@ test("native HTTP-date Retry-After is honored before another attempt", async () 
     server.stop(true);
   }
 }, 5000);
+
+test("Cloudflare AI Gateway uses the Workers AI route, gateway auth and unwraps the result", async () => {
+  const seen: { path: string; auth: string | null; gatewayAuth: string | null; body: unknown }[] =
+    [];
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      seen.push({
+        path: new URL(request.url).pathname,
+        auth: request.headers.get("authorization"),
+        gatewayAuth: request.headers.get("cf-aig-authorization"),
+        body: await request.json(),
+      });
+      return Response.json({
+        state: "Completed",
+        result: { model: "jev-1.13.0", answers: { useful: { type: "noul", noul: 0.7 } } },
+      });
+    },
+  });
+  try {
+    const evaluator = createEvaluator({
+      apiKey: "cf-token",
+      provider: "cloudflare",
+      gatewayURL: `http://127.0.0.1:${server.port}/v1/account/gateway/`,
+      signal: new AbortController().signal,
+    });
+    const result = await evaluator.evaluate({
+      state: "recordEvent()",
+      questions: { useful: { type: "boolean", instructions: "Is the source useful?" } },
+    });
+    expect(result).toEqual({ useful: 0.7 });
+    expect(seen).toEqual([
+      {
+        path: "/v1/account/gateway/workers-ai/run/typesafe/jev",
+        auth: null,
+        gatewayAuth: "Bearer cf-token",
+        body: {
+          state: "recordEvent()",
+          questions: { useful: { type: "noul", instructions: "Is the source useful?" } },
+        },
+      },
+    ]);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("Cloudflare gateway rejection is an authentication failure, and a missing URL never calls out", async () => {
+  let calls = 0;
+  const server = Bun.serve({
+    port: 0,
+    fetch() {
+      calls++;
+      return Response.json({ success: false, errors: [{ code: 10000 }] }, { status: 401 });
+    },
+  });
+  const request = {
+    state: "test",
+    questions: { q: { type: "boolean" as const, instructions: "Relevant?" } },
+  };
+  try {
+    const evaluator = createEvaluator({
+      apiKey: "bad",
+      provider: "cloudflare",
+      gatewayURL: `http://127.0.0.1:${server.port}`,
+      signal: new AbortController().signal,
+    });
+    await expect(evaluator.evaluate(request)).rejects.toMatchObject({ kind: "authentication" });
+    expect(calls).toBe(1);
+    for (const gatewayURL of [undefined, "http://gateway.example/v1/a/g"])
+      expect(() =>
+        createEvaluator({
+          apiKey: "x",
+          provider: "cloudflare",
+          gatewayURL,
+          signal: new AbortController().signal,
+        }),
+      ).toThrow();
+    expect(calls).toBe(1);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("gateway URLs must be https (or loopback http) without query, fragment or credentials", () => {
+  expect(parseGatewayURL("https://gateway.ai.cloudflare.com/v1/acct/gw/")).toBe(
+    "https://gateway.ai.cloudflare.com/v1/acct/gw",
+  );
+  expect(parseGatewayURL("https://ai.example.com")).toBe("https://ai.example.com");
+  for (const raw of [
+    "",
+    "gateway.ai.cloudflare.com/v1/acct/gw",
+    "http://ai.example.com",
+    "https://ai.example.com/?x=1",
+    "https://ai.example.com/#x",
+    "https://user:pass@ai.example.com",
+    "ftp://ai.example.com",
+  ])
+    expect(parseGatewayURL(raw)).toBeUndefined();
+});
+
+test("Cloudflare transport never follows a redirect with the gateway token", async () => {
+  let leaked = 0;
+  const target = Bun.serve({
+    port: 0,
+    fetch() {
+      leaked++;
+      return Response.json({ result: { answers: { q: { type: "noul", noul: 0.9 } } } });
+    },
+  });
+  const gateway = Bun.serve({
+    port: 0,
+    fetch: () => Response.redirect(`http://127.0.0.1:${target.port}/elsewhere`, 307),
+  });
+  try {
+    const evaluator = createEvaluator({
+      apiKey: "cf-token",
+      provider: "cloudflare",
+      gatewayURL: `http://127.0.0.1:${gateway.port}`,
+      signal: new AbortController().signal,
+    });
+    await expect(
+      evaluator.evaluate({
+        state: "test",
+        questions: { q: { type: "boolean", instructions: "Relevant?" } },
+      }),
+    ).rejects.toMatchObject({ kind: "provider" });
+    expect(leaked).toBe(0);
+  } finally {
+    gateway.stop(true);
+    target.stop(true);
+  }
+});

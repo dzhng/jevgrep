@@ -2,8 +2,14 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { isCancel, password, select } from "@clack/prompts";
-import { providers, isProviderId, type ProviderId } from "@repo/core/providers";
+import { isCancel, password, select, text } from "@clack/prompts";
+import {
+  isProviderId,
+  parseGatewayURL,
+  providers,
+  requiresGatewayURL,
+  type ProviderId,
+} from "@repo/core/providers";
 import { CliError } from "./errors";
 
 export function configDirectory() {
@@ -18,11 +24,26 @@ function validateKey(raw: string): string {
   return key;
 }
 
-export type Credentials = { provider: ProviderId; apiKey: string };
+export type Credentials = { provider: ProviderId; apiKey: string; gatewayURL?: string };
 
-export async function authenticate(provider: ProviderId | undefined, signal: AbortSignal) {
+function validateGatewayURL(raw: unknown): string {
+  const url = parseGatewayURL(raw);
+  if (!url)
+    throw new CliError(
+      "Provide your Cloudflare AI Gateway URL, such as https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY, without a query or credentials.",
+    );
+  return url;
+}
+
+export async function authenticate(
+  provider: ProviderId | undefined,
+  signal: AbortSignal,
+  gatewayArgument?: string,
+) {
   let key: string;
+  let gatewayURL: string | undefined;
   if (provider !== undefined) {
+    if (requiresGatewayURL(provider)) gatewayURL = validateGatewayURL(gatewayArgument);
     const chunks: Buffer[] = [];
     let bytes = 0;
     const abort = () => process.stdin.destroy(new DOMException("Interrupted", "AbortError"));
@@ -41,7 +62,7 @@ export async function authenticate(provider: ProviderId | undefined, signal: Abo
   } else {
     if (!process.stdin.isTTY)
       throw new CliError(
-        "Use auth --provider vercel|typesafe|openrouter --stdin to read a piped key.",
+        "Use auth --provider vercel|typesafe|openrouter|cloudflare --stdin to read a piped key.",
       );
     const selected = await select<ProviderId>({
       message: "Choose your Jev provider",
@@ -54,6 +75,17 @@ export async function authenticate(provider: ProviderId | undefined, signal: Abo
     });
     if (isCancel(selected)) throw new DOMException("Interrupted", "AbortError");
     provider = selected;
+    if (requiresGatewayURL(provider)) {
+      const url = await text({
+        message: "Enter your Cloudflare AI Gateway URL",
+        placeholder: "https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY",
+        validate: (value) => (parseGatewayURL(value) ? undefined : "Enter an https gateway URL"),
+        output: process.stdout,
+        signal,
+      });
+      if (isCancel(url)) throw new DOMException("Interrupted", "AbortError");
+      gatewayURL = validateGatewayURL(url);
+    }
     const answer = await password({
       message: `Paste your ${providers[provider].label} API key`,
       output: process.stdout,
@@ -70,10 +102,16 @@ export async function authenticate(provider: ProviderId | undefined, signal: Abo
   await chmod(directory, 0o700);
   const temporary = join(directory, `.credentials-${randomUUID()}.json`);
   try {
-    await writeFile(temporary, JSON.stringify({ provider, apiKey: key }) + "\n", {
-      mode: 0o600,
-      flag: "wx",
-    });
+    await writeFile(
+      temporary,
+      JSON.stringify(
+        gatewayURL ? { provider, apiKey: key, gatewayURL } : { provider, apiKey: key },
+      ) + "\n",
+      {
+        mode: 0o600,
+        flag: "wx",
+      },
+    );
     signal.throwIfAborted();
     await rename(temporary, join(directory, "credentials.json"));
   } finally {
@@ -92,6 +130,11 @@ export async function loadCredentials(): Promise<Credentials> {
     }
     const provider = Object.hasOwn(credentials, "provider") ? credentials.provider : "vercel";
     if (!isProviderId(provider)) throw new CliError("Invalid provider. Run jg auth again.");
+    if (requiresGatewayURL(provider)) {
+      const gatewayURL = parseGatewayURL(credentials.gatewayURL);
+      if (!gatewayURL) throw new CliError("Invalid gateway URL. Run jg auth again.");
+      return { provider, apiKey: validateKey(credentials.apiKey), gatewayURL };
+    }
     return { provider, apiKey: validateKey(credentials.apiKey) };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {

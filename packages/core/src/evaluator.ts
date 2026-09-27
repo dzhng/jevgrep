@@ -1,6 +1,6 @@
 import { APICallError, experimental_evaluate as evaluate } from "ai";
 import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
-import { providers, type ProviderId } from "./providers";
+import { cloudflareRunURL, parseGatewayURL, providers, type ProviderId } from "./providers";
 import { type createEvaluationCache, type CacheInput } from "./cache";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -27,6 +27,8 @@ export class EvaluationFailure extends Error {
 export function createEvaluator(options: {
   provider: ProviderId;
   apiKey: string;
+  /** Saved Cloudflare AI Gateway base URL; required for, and only used by, cloudflare. */
+  gatewayURL?: string;
   cache?: ReturnType<typeof createEvaluationCache>;
   policyVersion?: string;
   fetch?: typeof fetch;
@@ -35,6 +37,10 @@ export function createEvaluator(options: {
   timeoutMs?: number;
 }) {
   const preset = providers[options.provider];
+  const cloudflare = options.provider === "cloudflare";
+  const gatewayURL = cloudflare ? parseGatewayURL(options.gatewayURL) : undefined;
+  if (cloudflare && !gatewayURL) throw new EvaluationFailure("authentication");
+  const endpoint = gatewayURL ? cloudflareRunURL(gatewayURL) : preset.baseURL;
   let requests = 0;
   let cacheHits = 0;
   let cooldownUntil = 0;
@@ -51,7 +57,10 @@ export function createEvaluator(options: {
       if (requests >= (options.requestLimit ?? 50_000))
         throw new EvaluationFailure("request-limit");
       requests++;
-      const response = await (options.fetch ?? fetch)(input, init);
+      const transport = options.fetch ?? fetch;
+      const response = gatewayURL
+        ? await cloudflareTransport(transport, endpoint, init)
+        : await transport(input, init);
       if (response.status === 429) {
         const raw = response.headers.get("retry-after");
         const seconds = raw === null ? NaN : Number(raw);
@@ -87,8 +96,8 @@ export function createEvaluator(options: {
         namespace: {
           model: preset.model,
           provider: options.provider,
-          endpoint: preset.baseURL,
-          protocol: "typesafe-ai-3.0.8",
+          endpoint,
+          protocol: cloudflare ? "typesafe-ai-3.0.8+workers-ai-run" : "typesafe-ai-3.0.8",
           policyVersion: options.policyVersion ?? "1",
           parserVersion: "cpython-3.11.3-pyodide-0.25.1-ts-5.9.3",
           promptVersion: "unit-locators-1",
@@ -182,4 +191,37 @@ export function createEvaluator(options: {
       throw new EvaluationFailure("provider");
     },
   };
+}
+
+/**
+ * Cloudflare AI Gateway serves Jev as a Workers AI model at <gateway>/workers-ai/run/typesafe/jev:
+ * the model comes from the path, the gateway token travels as cf-aig-authorization, and the
+ * TypeSafe answer is wrapped as {state, result}. Error responses pass through unchanged so
+ * status handling (401/403, 429, 5xx) stays with the evaluator.
+ */
+async function cloudflareTransport(
+  transport: typeof fetch,
+  endpoint: string,
+  init: RequestInit | undefined,
+): Promise<Response> {
+  const { model: _model, ...input } = JSON.parse(String(init?.body));
+  const headers = new Headers(init?.headers);
+  const authorization = headers.get("authorization");
+  headers.delete("authorization");
+  if (authorization) headers.set("cf-aig-authorization", authorization);
+  // Fetch drops Authorization on a cross-origin redirect but would forward cf-aig-authorization.
+  const response = await transport(endpoint, {
+    ...init,
+    headers,
+    body: JSON.stringify(input),
+    redirect: "error",
+  });
+  if (!response.ok) return response;
+  const envelope: unknown = await response.json();
+  const answer =
+    envelope && typeof envelope === "object" && "result" in envelope ? envelope.result : envelope;
+  const responseHeaders = new Headers(response.headers);
+  responseHeaders.delete("content-length");
+  responseHeaders.delete("content-encoding");
+  return Response.json(answer, { status: response.status, headers: responseHeaders });
 }

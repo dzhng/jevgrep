@@ -1,13 +1,13 @@
 import { parseArgs } from "node:util";
 import type { SearchInput } from "@repo/core";
-import { isProviderId, type ProviderId } from "@repo/core/providers";
+import { isProviderId, requiresGatewayURL, type ProviderId } from "@repo/core/providers";
 import { CliError } from "./errors";
 import { DEFAULT_MAX_SOURCE_BYTES } from "./render";
 
 export type Command =
   | { kind: "help" | "version" | "doctor" | "cache-clear" }
   | { kind: "skill"; agents: string[]; global: boolean; yes: boolean }
-  | { kind: "auth"; provider?: ProviderId }
+  | { kind: "auth"; provider?: ProviderId; gatewayURL?: string }
   | {
       kind: "search";
       query: string;
@@ -29,6 +29,7 @@ export function parseCommand(args: string[]): Command {
         version: { type: "boolean" },
         stdin: { type: "boolean" },
         provider: { type: "string" },
+        "gateway-url": { type: "string" },
         agent: { type: "string", multiple: true },
         global: { type: "boolean" },
         yes: { type: "boolean" },
@@ -51,12 +52,23 @@ export function parseCommand(args: string[]): Command {
   if (values.help || values.version) throw new CliError("Use --help or --version alone.");
   const first = positionals[0];
   if (first === "auth") {
-    if (positionals.length !== 1 || keys.some((key) => !["stdin", "provider"].includes(key)))
+    if (
+      positionals.length !== 1 ||
+      keys.some((key) => !["stdin", "provider", "gateway-url"].includes(key))
+    )
       throw new CliError("Usage: jg auth OR jg auth --provider NAME --stdin");
     if (!keys.length) return { kind: "auth" };
     if (!values.stdin || !isProviderId(values.provider))
-      throw new CliError("Use auth --provider vercel|typesafe|openrouter --stdin for a piped key.");
-    return { kind: "auth", provider: values.provider };
+      throw new CliError(
+        "Use auth --provider vercel|typesafe|openrouter|cloudflare --stdin for a piped key.",
+      );
+    const provider = values.provider;
+    const gatewayURL = values["gateway-url"];
+    if (requiresGatewayURL(provider) !== (gatewayURL !== undefined))
+      throw new CliError("Use --gateway-url URL with, and only with, --provider cloudflare.");
+    return gatewayURL === undefined
+      ? { kind: "auth", provider }
+      : { kind: "auth", provider, gatewayURL };
   }
   if (first === "skill") {
     const agents = values.agent ?? [];
@@ -82,7 +94,7 @@ export function parseCommand(args: string[]): Command {
     !first?.trim() ||
     positionals.length > 2 ||
     values.stdin ||
-    keys.some((key) => ["agent", "global", "yes", "provider"].includes(key))
+    keys.some((key) => ["agent", "global", "yes", "provider", "gateway-url"].includes(key))
   )
     throw new CliError('Usage: jg "question" [root]. Run jg --help.');
   const rawBudget = values["max-source-bytes"];
@@ -122,7 +134,10 @@ Commands:
 
 Auth automation:
   auth --provider vercel|typesafe|openrouter --stdin
+  auth --provider cloudflare --gateway-url URL --stdin
   Save one provider/key from a pipe. Re-running auth replaces your setup.
+  Cloudflare URL: https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY
+  or your gateway's custom domain.
   Saved credentials only; provider key/URL environment variables are ignored.
 
 Skill installation options:

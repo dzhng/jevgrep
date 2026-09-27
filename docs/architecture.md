@@ -96,7 +96,10 @@ does not guarantee that the coding agent tests the right behavioral boundary.
 ## Integration and acceptance
 
 Use TypeScript and the AI SDK evaluation interface through one TypeSafe-compatible
-adapter, with fixed Vercel, TypeSafe and OpenRouter presets. Pass native
+adapter, with fixed Vercel, TypeSafe and OpenRouter presets, and a Cloudflare AI Gateway
+preset whose account gateway URL is saved by auth. Cloudflare serves Jev on its
+Workers AI route, so the evaluator adapts that one request's path, auth header and
+result envelope. Pass native
 `state` and `questions` objects; source is a string field within that data. The
 SDK handles HTTP serialization. Keep provider authentication and model access at
 the core boundary so future providers do not reshape traversal or stdout.
