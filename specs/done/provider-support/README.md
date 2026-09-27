@@ -1,8 +1,8 @@
 # Saved-provider support
 
-Jevgrep supports Vercel AI Gateway, native TypeSafe and OpenRouter through one
-TypeSafe-compatible AI SDK adapter. The implementation landed in `9496540` after
-the protocol checkpoint `06daef9`; it has not been published to npm.
+Jevgrep routes its [saved providers](../../../packages/core/src/providers.ts) through
+one TypeSafe-compatible AI SDK adapter. Provider selection changes transport while
+keeping retrieval behavior fixed.
 
 ## Why selection belongs in auth
 

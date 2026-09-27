@@ -41,6 +41,11 @@ const providers = {
     url: "https://openrouter.ai/api/v1/systemone",
     model: "jev-1.13",
   },
+  opencode: {
+    label: "OpenCode Zen",
+    url: "https://opencode.ai/zen/v1/systemone",
+    model: "jev-1.13",
+  },
 };
 const fixtureKey = "installed-http-fixture-key";
 const forbidden = "INSTALLED_FIXTURE_IGNORED_CONTENT_MUST_NEVER_UPLOAD";

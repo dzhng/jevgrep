@@ -8,6 +8,7 @@ export const providers = {
   vercel: { url: "https://ai-gateway.vercel.sh/typesafe/v1/systemone", model: "typesafe-ai/jev" },
   typesafe: { url: "https://api.typesafe.ai/v1/systemone", model: "jev-1.13.0" },
   openrouter: { url: "https://openrouter.ai/api/v1/systemone", model: "jev-1.13" },
+  opencode: { url: "https://opencode.ai/zen/v1/systemone", model: "jev-1.13" },
 } as const;
 export type Provider = keyof typeof providers;
 
