@@ -73,5 +73,12 @@ gateway prompt.
 [Verification](assets/verification.md) records the gates and the live checks
 against a real gateway. The live checks prove transport through Cloudflare's
 route. They do not establish identical probabilities to other providers, solve
-quality, cost savings or latency claims. [Choices](choices.md) records the
+quality, cost savings or latency claims.
+
+Workers AI applies its own rate limit to `typesafe/jev`, separate from any gateway
+rate limit. One live search received 42 HTTP 429 responses (`Rate limited`, no
+`retry-after`) and reported incomplete discovery. Three back-to-back uncached
+repeats of that search completed with no 429s. The existing shared cooldown and
+bounded retries handle it; a throttled run is reported as incomplete, never as
+negative evidence. [Choices](choices.md) records the
 decisions the implementation made.
