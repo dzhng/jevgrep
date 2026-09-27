@@ -3,6 +3,7 @@ const endpoints = new Set([
   "https://ai-gateway.vercel.sh/typesafe/v1/systemone",
   "https://api.typesafe.ai/v1/systemone",
   "https://openrouter.ai/api/v1/systemone",
+  "https://gateway.ai.cloudflare.com/v1/fixture-account/fixture-gateway/workers-ai/run/typesafe/jev",
 ]);
 export function routeProviderFetch(originalFetch, origin) {
   return async (input, init) => {

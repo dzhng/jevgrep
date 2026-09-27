@@ -42,13 +42,15 @@ testInDocker("interactive auth hides input and exits 130 on interruption", async
   await withCli(async ({ home }) => {
     for (const mode of [
       "save",
+      "save-cloudflare",
       "interrupt-provider",
       "interrupt-key",
       "cancel-provider",
       "cancel-key",
     ]) {
       const file = join(home, "jevgrep", "credentials.json");
-      const previous = mode === "save" ? undefined : await readFile(file, "utf8");
+      const saves = mode.startsWith("save");
+      const previous = saves ? undefined : await readFile(file, "utf8");
       const { stdout } = await execute(
         "python3",
         [
@@ -72,10 +74,15 @@ try:
                 output += part
     wait_for(b"Choose your Jev provider")
     mode = sys.argv[2]
-    if not mode.endswith("provider"):
+    if mode == "save-cloudflare":
+        os.write(master, b"\\x1b[B\\x1b[B\\x1b[B\\r")
+        wait_for(b"Cloudflare AI Gateway URL")
+        os.write(master, b"https://gateway.ai.cloudflare.com/v1/pty-account/pty-gateway\\r")
+        wait_for(b"API key")
+    elif not mode.endswith("provider"):
         os.write(master, b"\\x1b[B\\x1b[B\\r")
         wait_for(b"API key")
-    if mode == "save":
+    if mode.startswith("save"):
         os.write(master, b"pty-fixture-secret\\r")
     elif mode.startswith("cancel"):
         os.write(master, b"\\x03")
@@ -103,11 +110,20 @@ finally:
         { env: { ...process.env, HOME: home, XDG_CONFIG_HOME: home } },
       );
       const result = JSON.parse(stdout);
-      expect(result.code).toBe(mode === "save" ? 0 : 130);
+      expect(result.code).toBe(saves ? 0 : 130);
       expect(result.stderr).toBe("");
       expect(result.stdout + result.echo).not.toContain("pty-fixture-secret");
-      expect(result.stdout).toContain(mode === "save" ? "key saved" : "Interrupted");
-      if (mode === "save") {
+      expect(result.stdout).toContain(saves ? "key saved" : "Interrupted");
+      if (mode === "save-cloudflare") {
+        expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+          provider: "cloudflare",
+          apiKey: "pty-fixture-secret",
+          gatewayURL: "https://gateway.ai.cloudflare.com/v1/pty-account/pty-gateway",
+        });
+        expect(result.stdout.indexOf("OpenRouter")).toBeLessThan(
+          result.stdout.indexOf("Cloudflare AI Gateway"),
+        );
+      } else if (mode === "save") {
         expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
           provider: "openrouter",
           apiKey: "pty-fixture-secret",

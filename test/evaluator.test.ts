@@ -459,3 +459,33 @@ test("Cloudflare transport never follows a redirect with the gateway token", asy
     target.stop(true);
   }
 });
+
+test("Cloudflare answers count only from a Completed envelope, never as negative evidence", async () => {
+  const bodies = [
+    { state: "Queued", result: { answers: { q: { type: "noul", noul: 0.9 } } } },
+    { state: "Completed" },
+    { answers: { q: { type: "noul", noul: 0.9 } } },
+  ];
+  let calls = 0;
+  const server = Bun.serve({ port: 0, fetch: () => Response.json(bodies[calls++]) });
+  try {
+    for (const _ of bodies) {
+      const evaluator = createEvaluator({
+        apiKey: "cf-token",
+        provider: "cloudflare",
+        gatewayURL: `http://127.0.0.1:${server.port}`,
+        signal: new AbortController().signal,
+        requestLimit: 1,
+      });
+      await expect(
+        evaluator.evaluate({
+          state: "test",
+          questions: { q: { type: "boolean", instructions: "Relevant?" } },
+        }),
+      ).rejects.toBeInstanceOf(Error);
+    }
+    expect(calls).toBe(3);
+  } finally {
+    server.stop(true);
+  }
+});

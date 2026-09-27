@@ -21,7 +21,8 @@ export async function replay(
         questions: Record<string, unknown>;
       };
       requests.push(body);
-      if (mode === "missing") return Response.json(wireResponse({ answers: {} }, production));
+      if (mode === "missing")
+        return Response.json(wireResponse({ answers: {} }, production, provider));
       if (mode === "invalid")
         return Response.json(
           wireResponse(
@@ -31,6 +32,7 @@ export async function replay(
               ),
             },
             production,
+            provider,
           ),
         );
       return Response.json(
@@ -57,6 +59,7 @@ export async function replay(
             warnings: [{ type: "other", message: "fixture warning" }],
           },
           production,
+          provider,
         ),
       );
     },

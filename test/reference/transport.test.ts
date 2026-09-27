@@ -8,10 +8,12 @@ test("wire normalization retains every corpus field and rejects unknown envelope
     const transport = await referenceTransport(provider);
     try {
       const preset = providers[provider];
+      // Cloudflare's Workers AI route authenticates the gateway header and has no body model.
+      const cloudflare = provider === "cloudflare";
       const request = new Request(preset.url, {
         method: "POST",
         headers: {
-          authorization: "Bearer fixture",
+          [cloudflare ? "cf-aig-authorization" : "authorization"]: "Bearer fixture",
           "content-type": "application/json",
           "x-jevgrep-original-url": preset.url,
         },
@@ -28,7 +30,7 @@ test("wire normalization retains every corpus field and rejects unknown envelope
         });
         expect(JSON.stringify(transport.decode(historical, original, false))).toBe(serialized);
         const wire = {
-          model: preset.model,
+          ...(cloudflare ? {} : { model: preset.model }),
           state: original.state,
           questions: Object.fromEntries(
             Object.entries(original.questions).map(([id, question]) => [
@@ -54,6 +56,11 @@ test("wire normalization retains every corpus field and rejects unknown envelope
           ),
         ).toThrow();
         expect(() => transport.decode(request, { ...wire, model: "wrong-model" }, true)).toThrow();
+        if (cloudflare) {
+          const bearer = new Request(request);
+          bearer.headers.set("authorization", "Bearer fixture");
+          expect(() => transport.decode(bearer, wire, true)).toThrow();
+        }
       }
     } finally {
       await transport.cleanup();

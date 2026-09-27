@@ -196,7 +196,7 @@ export function createEvaluator(options: {
 /**
  * Cloudflare AI Gateway serves Jev as a Workers AI model at <gateway>/workers-ai/run/typesafe/jev:
  * the model comes from the path, the gateway token travels as cf-aig-authorization, and the
- * TypeSafe answer is wrapped as {state, result}. Error responses pass through unchanged so
+ * TypeSafe answer is wrapped as {state: "Completed", result}. Error responses pass through unchanged so
  * status handling (401/403, 429, 5xx) stays with the evaluator.
  */
 async function cloudflareTransport(
@@ -218,8 +218,12 @@ async function cloudflareTransport(
   });
   if (!response.ok) return response;
   const envelope: unknown = await response.json();
-  const answer =
-    envelope && typeof envelope === "object" && "result" in envelope ? envelope.result : envelope;
+  // Only a Completed envelope carries an answer; anything else fails answer validation.
+  const completed =
+    envelope && typeof envelope === "object" && "state" in envelope && "result" in envelope
+      ? envelope.state === "Completed"
+      : false;
+  const answer = completed ? (envelope as { result: unknown }).result : null;
   const responseHeaders = new Headers(response.headers);
   responseHeaders.delete("content-length");
   responseHeaders.delete("content-encoding");
