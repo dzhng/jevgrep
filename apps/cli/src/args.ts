@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import type { SearchInput } from "@repo/core";
-import { isProviderId, type ProviderId } from "@repo/core/providers";
+import { providers, isProviderId, type ProviderId } from "@repo/core/providers";
 import { CliError } from "./errors";
 import { DEFAULT_MAX_SOURCE_BYTES } from "./render";
 
@@ -55,7 +55,9 @@ export function parseCommand(args: string[]): Command {
       throw new CliError("Usage: jg auth OR jg auth --provider NAME --stdin");
     if (!keys.length) return { kind: "auth" };
     if (!values.stdin || !isProviderId(values.provider))
-      throw new CliError("Use auth --provider vercel|typesafe|openrouter --stdin for a piped key.");
+      throw new CliError(
+        `Use auth --provider ${Object.keys(providers).join("|")} --stdin for a piped key.`,
+      );
     return { kind: "auth", provider: values.provider };
   }
   if (first === "skill") {
@@ -121,7 +123,7 @@ Commands:
   --version       Show the installed version
 
 Auth automation:
-  auth --provider vercel|typesafe|openrouter --stdin
+  auth --provider ${Object.keys(providers).join("|")} --stdin
   Save one provider/key from a pipe. Re-running auth replaces your setup.
   Saved credentials only; provider key/URL environment variables are ignored.
 

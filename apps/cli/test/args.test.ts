@@ -55,6 +55,10 @@ test("auth requires explicit provider for stdin and keeps provider selection out
     kind: "auth",
     provider: "openrouter",
   });
+  expect(parseCommand(["auth", "--provider", "opencode", "--stdin"])).toEqual({
+    kind: "auth",
+    provider: "opencode",
+  });
   for (const args of [
     ["auth", "--stdin"],
     ["auth", "--provider", "vercel"],

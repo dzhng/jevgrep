@@ -14,6 +14,11 @@ export const providers = {
     baseURL: "https://openrouter.ai/api/v1",
     model: "jev-1.13",
   },
+  opencode: {
+    label: "OpenCode Zen",
+    baseURL: "https://opencode.ai/zen/v1",
+    model: "jev-1.13",
+  },
 } as const;
 
 export type ProviderId = keyof typeof providers;

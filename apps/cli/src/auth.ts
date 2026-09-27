@@ -41,7 +41,7 @@ export async function authenticate(provider: ProviderId | undefined, signal: Abo
   } else {
     if (!process.stdin.isTTY)
       throw new CliError(
-        "Use auth --provider vercel|typesafe|openrouter --stdin to read a piped key.",
+        `Use auth --provider ${Object.keys(providers).join("|")} --stdin to read a piped key.`,
       );
     const selected = await select<ProviderId>({
       message: "Choose your Jev provider",

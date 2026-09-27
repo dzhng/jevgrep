@@ -6,15 +6,18 @@ retrieval experiment.
 
 ## Fixed presets
 
-| Provider ID  | AI SDK adapter base URL                    | Model sent in body | Evidence                                                                                                                                   |
-| ------------ | ------------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `vercel`     | `https://ai-gateway.vercel.sh/typesafe/v1` | `typesafe-ai/jev`  | [Vercel TypeSafe API](https://vercel.com/docs/ai-gateway/sdks-and-apis/typesafe) explicitly shows this model and `/typesafe/v1/systemone`. |
-| `typesafe`   | `https://api.typesafe.ai/v1`               | `jev-1.13.0`       | [TypeSafe models](https://docs.typesafe.ai/models) documents the versioned ID; pin it because retrieval thresholds are calibrated.         |
-| `openrouter` | `https://openrouter.ai/api/v1`             | `jev-1.13`         | [OpenRouter's Jev guide](https://openrouter.ai/blog/insights/what-is-jev/) documents the TypeSafe-compatible route and this bare model ID. |
+| Provider ID  | AI SDK adapter base URL                    | Model sent in body | Evidence                                                                                                                                                                                                                                              |
+| ------------ | ------------------------------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vercel`     | `https://ai-gateway.vercel.sh/typesafe/v1` | `typesafe-ai/jev`  | [Vercel TypeSafe API](https://vercel.com/docs/ai-gateway/sdks-and-apis/typesafe) explicitly shows this model and `/typesafe/v1/systemone`.                                                                                                            |
+| `typesafe`   | `https://api.typesafe.ai/v1`               | `jev-1.13.0`       | [TypeSafe models](https://docs.typesafe.ai/models) documents the versioned ID; pin it because retrieval thresholds are calibrated.                                                                                                                    |
+| `openrouter` | `https://openrouter.ai/api/v1`             | `jev-1.13`         | [OpenRouter's Jev guide](https://openrouter.ai/blog/insights/what-is-jev/) documents the TypeSafe-compatible route and this bare model ID.                                                                                                            |
+| `opencode`   | `https://opencode.ai/zen/v1`               | `jev-1.13`         | [OpenCode Zen models doc](https://opencode.ai/v2/docs/console/models/#jev) documents the TypeSafe-compatible `/zen/v1/systemone` route and this model ID; verified against `@ai-sdk/typesafe-ai@3.0.8` source (`${baseURL}/systemone`, noul answers). |
 
 The native TypeSafe client examples use a base URL without `/v1`; the AI SDK
 adapter appends only `/systemone`, so its presets include `/v1`. Do not substitute
 OpenRouter chat completions or its separate `/api/alpha/decisions` API.
+
+`opencode` was live-verified 2026-09-27: `jg auth --provider opencode --stdin` saved the key and `jg doctor` reported `Jev connection verified through OpenCode Zen.`, confirming the Zen response matches the SDK's zod schema (noul answers). A real search returned relevant files.
 
 Versioned native/OpenRouter names do not prove identical backends or answers to
 Vercel's alias. Preserve existing thresholds; do not claim cross-provider solve
