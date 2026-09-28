@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { authenticate, configDirectory, loadCredentials } from "./auth";
-import { providers } from "@repo/core/providers";
+import { endpointFor } from "@repo/core/providers";
 import { help, parseCommand } from "./args";
 import { CliError } from "./errors";
 import { renderResult } from "./render";
@@ -47,7 +47,7 @@ async function main() {
       process.exitCode = await installSkill(command, controller.signal);
       return;
     case "auth":
-      return authenticate(command.provider, controller.signal);
+      return authenticate(command, controller.signal);
     case "cache-clear": {
       const { createEvaluationCache } = await import("@repo/core");
       const cache = createEvaluationCache({ directory: cacheDirectory() });
@@ -58,6 +58,7 @@ async function main() {
     }
     case "doctor": {
       const credentials = await loadCredentials();
+      const endpoint = endpointFor(credentials);
       const { createEvaluator, EvaluationFailure } = await import("@repo/core");
       const evaluator = createEvaluator({
         ...credentials,
@@ -75,22 +76,22 @@ async function main() {
         });
         if (!(answers.relevant! > 0.5))
           throw new CliError(
-            `${providers[credentials.provider].label} returned an unexpected answer to the connection check.`,
+            `${endpoint.label} returned an unexpected answer to the connection check.`,
           );
-        await write(`Jev connection verified through ${providers[credentials.provider].label}.\n`);
+        await write(`Jev connection verified through ${endpoint.label}.\n`);
       } catch (error) {
         if (error instanceof CliError) throw error;
         if (error instanceof EvaluationFailure && error.diagnostic) {
           const { statusCode, message } = error.diagnostic;
           throw new CliError(
-            `Jev connection check failed through ${providers[credentials.provider].label} (HTTP ${statusCode}).\n` +
+            `Jev connection check failed through ${endpoint.label} (HTTP ${statusCode}).\n` +
               (message
                 ? `Provider: ${message}`
                 : "Check your saved key, model access, and provider billing."),
           );
         }
         throw new CliError(
-          `Jev connection check failed through ${providers[credentials.provider].label}. Check your saved key, model access, and network.`,
+          `Jev connection check failed through ${endpoint.label}. Check your saved key, model access, and network.`,
         );
       }
       return;

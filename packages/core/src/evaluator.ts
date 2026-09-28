@@ -1,6 +1,6 @@
 import { APICallError, experimental_evaluate as evaluate } from "ai";
 import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
-import { providers, type ProviderId } from "./providers";
+import { endpointFor, type CredentialProvider } from "./providers";
 import { type createEvaluationCache, type CacheInput } from "./cache";
 import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
@@ -28,8 +28,10 @@ export class EvaluationFailure extends Error {
 }
 
 export function createEvaluator(options: {
-  provider: ProviderId;
+  provider: CredentialProvider;
   apiKey: string;
+  baseURL?: string;
+  model?: string;
   cache?: ReturnType<typeof createEvaluationCache>;
   policyVersion?: string;
   fetch?: typeof fetch;
@@ -38,7 +40,7 @@ export function createEvaluator(options: {
   timeoutMs?: number;
   concurrency?: number;
 }) {
-  const preset = providers[options.provider];
+  const endpoint = endpointFor(options);
   const concurrency = options.concurrency ?? 32;
   if (!Number.isSafeInteger(concurrency) || concurrency < 1)
     throw new Error("Concurrency must be a positive integer");
@@ -73,7 +75,7 @@ export function createEvaluator(options: {
   }
   const provider = createTypeSafeAi({
     apiKey: options.apiKey,
-    baseURL: preset.baseURL,
+    baseURL: endpoint.baseURL,
     fetch: async (input, init) => {
       assertActive();
       if (requests >= (options.requestLimit ?? 50_000))
@@ -113,9 +115,9 @@ export function createEvaluator(options: {
       const cacheInput: CacheInput = {
         request,
         namespace: {
-          model: preset.model,
+          model: endpoint.model,
           provider: options.provider,
-          endpoint: preset.baseURL,
+          endpoint: endpoint.baseURL,
           protocol: "typesafe-ai-3.0.8",
           policyVersion: options.policyVersion ?? "1",
           parserVersion: "cpython-3.11.3-pyodide-0.25.1-ts-5.9.3",
@@ -160,7 +162,7 @@ export function createEvaluator(options: {
           assertActive();
           try {
             const result = await evaluate({
-              model: provider.evaluationModel(preset.model),
+              model: provider.evaluationModel(endpoint.model),
               ...request,
               maxRetries: 0,
               abortSignal: AbortSignal.any([

@@ -1,13 +1,16 @@
 import { parseArgs } from "node:util";
 import type { SearchInput } from "@repo/core";
-import { providers, isProviderId, type ProviderId } from "@repo/core/providers";
+import { providers, customProviderId, isCredentialProvider } from "@repo/core/providers";
 import { CliError } from "./errors";
 import { DEFAULT_MAX_SOURCE_BYTES } from "./render";
+import type { AuthOptions } from "./auth";
+
+const credentialProviders = [...Object.keys(providers), customProviderId];
 
 export type Command =
   | { kind: "help" | "version" | "doctor" | "cache-clear" }
   | { kind: "skill"; agents: string[]; global: boolean; yes: boolean }
-  | { kind: "auth"; provider?: ProviderId }
+  | ({ kind: "auth" } & AuthOptions)
   | {
       kind: "search";
       query: string;
@@ -30,6 +33,8 @@ export function parseCommand(args: string[]): Command {
         version: { type: "boolean" },
         stdin: { type: "boolean" },
         provider: { type: "string" },
+        "base-url": { type: "string" },
+        model: { type: "string" },
         agent: { type: "string", multiple: true },
         global: { type: "boolean" },
         yes: { type: "boolean" },
@@ -53,13 +58,28 @@ export function parseCommand(args: string[]): Command {
   if (values.help || values.version) throw new CliError("Use --help or --version alone.");
   const first = positionals[0];
   if (first === "auth") {
-    if (positionals.length !== 1 || keys.some((key) => !["stdin", "provider"].includes(key)))
+    if (
+      positionals.length !== 1 ||
+      keys.some((key) => !["stdin", "provider", "base-url", "model"].includes(key))
+    )
       throw new CliError("Usage: jg auth OR jg auth --provider NAME --stdin");
     if (!keys.length) return { kind: "auth" };
-    if (!values.stdin || !isProviderId(values.provider))
+    if (!values.stdin || !isCredentialProvider(values.provider))
       throw new CliError(
-        `Use auth --provider ${Object.keys(providers).join("|")} --stdin for a piped key.`,
+        `Use auth --provider ${credentialProviders.join("|")} --stdin for a piped key.`,
       );
+    if (values.provider === customProviderId) {
+      if (!values["base-url"] || !values.model)
+        throw new CliError("Custom endpoints need --base-url URL and --model ID with --stdin.");
+      return {
+        kind: "auth",
+        provider: customProviderId,
+        baseURL: values["base-url"],
+        model: values.model,
+      };
+    }
+    if (values["base-url"] !== undefined || values.model !== undefined)
+      throw new CliError("--base-url and --model are only valid with --provider custom.");
     return { kind: "auth", provider: values.provider };
   }
   if (first === "skill") {
@@ -86,7 +106,7 @@ export function parseCommand(args: string[]): Command {
     !first?.trim() ||
     positionals.length > 2 ||
     values.stdin ||
-    keys.some((key) => ["agent", "global", "yes", "provider"].includes(key))
+    keys.some((key) => ["agent", "global", "yes", "provider", "base-url", "model"].includes(key))
   )
     throw new CliError('Usage: jg "question" [root]. Run jg --help.');
   let concurrency: number | undefined;
@@ -125,15 +145,18 @@ Usage: jg "question" [root]
 Root defaults to the current directory; use -- before a root beginning with -.
 
 Commands:
-  auth            Choose a provider, then save its key (hidden prompt)
+  auth            Choose a provider or custom endpoint, then save its key
   doctor          Verify Jev access using a synthetic question
   skill           Install the agent skill via npx skills
   --help, -h      Show usage
   --version       Show the installed version
 
 Auth automation:
-  auth --provider ${Object.keys(providers).join("|")} --stdin
+  auth --provider ${credentialProviders.join("|")} --stdin
+  auth --provider custom --base-url URL --model ID --stdin
   Save one provider/key from a pipe. Re-running auth replaces your setup.
+  Custom endpoints must use https://; http:// is allowed only for localhost
+  and 127.0.0.1. Auth and doctor name the endpoint host, never the key.
   Saved credentials only; provider key/URL environment variables are ignored.
 
 Skill installation options:
