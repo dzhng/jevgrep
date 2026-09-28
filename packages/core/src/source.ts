@@ -20,11 +20,18 @@ export type Inspection = {
 };
 
 type SourceText = { bytes: Buffer; offsets: number[]; lineCount: number };
-function sourceText(source: string): SourceText {
+const sourceTexts = new WeakMap<Snapshot, { source: string; text: SourceText }>();
+function sourceText(snapshot: Snapshot): SourceText {
+  const { source } = snapshot;
+  const cached = sourceTexts.get(snapshot);
+  // Readonly is a type-level promise; mutable callers must not receive stale bytes.
+  if (cached?.source === source) return cached.text;
   const lines = source.split("\n"),
     offsets = [0];
   for (const line of lines) offsets.push(offsets.at(-1)! + Buffer.byteLength(line) + 1);
-  return { bytes: Buffer.from(source), offsets, lineCount: lines.length };
+  const text = { bytes: Buffer.from(source), offsets, lineCount: lines.length };
+  sourceTexts.set(snapshot, { source, text });
+  return text;
 }
 function textUnits(
   text: SourceText,
@@ -82,7 +89,7 @@ export async function inspect(
       "Source bounds must be integers; unit bytes at least 4 and parse bytes positive",
     );
   const { source, path } = snapshot;
-  const text = sourceText(source);
+  const text = sourceText(snapshot);
   // Context windows use conservative whole-line Python comments, including inside multiline strings.
   const pythonComments = /\.pyi?$/.test(path)
     ? source
@@ -313,8 +320,8 @@ export async function pythonPreview(
 
 /** Byte spans include original line endings; never widen a partial unit to whole lines. */
 export function sourceForUnit(snapshot: Snapshot, unit: SourceUnit): string {
-  return Buffer.from(snapshot.source)
-    .subarray(unit.sourceByteStart, unit.sourceByteEnd)
+  return sourceText(snapshot)
+    .bytes.subarray(unit.sourceByteStart, unit.sourceByteEnd)
     .toString("utf8");
 }
 
@@ -322,6 +329,6 @@ export function sourceForUnit(snapshot: Snapshot, unit: SourceUnit): string {
 export function splitSource(snapshot: Snapshot, maxBytes = 12_000): SourceUnit[] {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 4)
     throw new Error("Invalid source byte allowance");
-  const text = sourceText(snapshot.source);
+  const text = sourceText(snapshot);
   return textUnits(text, { startLine: 1, endLine: text.lineCount }, "source", maxBytes, false);
 }

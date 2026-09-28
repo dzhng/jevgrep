@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { inspect } from "../../packages/core/src/source.ts";
+import { inspect, sourceForUnit, splitSource } from "../../packages/core/src/source.ts";
 
 test("Python preserves decorators, class context and nested declarations", async () => {
   const source =
@@ -296,4 +296,68 @@ test("same-named classes retain their own structural headers", async () => {
       { startLine: 4, endLine: 4 },
     ]);
   }
+});
+
+test("fragment extraction keeps source encoding allocation linear in source size", () => {
+  const source = "é漢🙂 source line\r\n".repeat(2_000);
+  const snapshot = { path: "wide.txt", contentHash: "fixture", source };
+  const originalFrom = Buffer.from;
+  let encodedBytes = 0;
+  // This global Buffer.from probe must remain in a non-concurrent test.
+  // Count allocation at the runtime boundary, including splitting and extraction.
+  Buffer.from = ((...args: Parameters<typeof Buffer.from>) => {
+    if (typeof args[0] === "string") encodedBytes += Buffer.byteLength(args[0]);
+    return Reflect.apply(originalFrom, Buffer, args);
+  }) as typeof Buffer.from;
+  try {
+    const pieces = splitSource(snapshot, 1_000).map((unit) => sourceForUnit(snapshot, unit));
+    assert.equal(pieces.join(""), source);
+    assert.ok(encodedBytes <= Buffer.byteLength(source) * 2, `encoded ${encodedBytes} bytes`);
+  } finally {
+    Buffer.from = originalFrom;
+  }
+});
+
+test("cached fragments preserve exact bytes and coordinates across line endings", async () => {
+  for (const source of ["", "é漢🙂", "é漢🙂\n", "é漢🙂\r\nlast", "é漢🙂".repeat(8_000)]) {
+    const snapshot = { path: "text.txt", contentHash: "fixture", source };
+    const first = splitSource(snapshot, 16);
+    assert.deepEqual(splitSource(snapshot, 16), first);
+    assert.equal(first.map((unit) => sourceForUnit(snapshot, unit)).join(""), source);
+    const parsed = await inspect(snapshot, { maxUnitBytes: 16 });
+    assert.equal(parsed.units.map((unit) => sourceForUnit(snapshot, unit)).join(""), source);
+    if (source) {
+      assert.equal(first[0]!.sourceByteStart, 0);
+      assert.equal(first.at(-1)!.sourceByteEnd, Buffer.byteLength(source));
+      assert.equal(first.at(-1)!.range.endLine, source.split("\n").length);
+    }
+  }
+});
+
+test("snapshot identity reuse never returns bytes from another or mutated source", async () => {
+  const snapshot = { path: "same.txt", contentHash: "fixture", source: "old\nsource" };
+  const oldUnits = splitSource(snapshot, 4);
+  assert.equal(oldUnits.map((unit) => sourceForUnit(snapshot, unit)).join(""), snapshot.source);
+  const other = { ...snapshot, source: "é漢🙂\r\nnew" };
+  assert.equal(
+    splitSource(other, 4)
+      .map((unit) => sourceForUnit(other, unit))
+      .join(""),
+    other.source,
+  );
+  snapshot.source = "changed\n🙂";
+  const changedUnits = (await inspect(snapshot, { maxUnitBytes: 4 })).units;
+  assert.equal(changedUnits.map((unit) => sourceForUnit(snapshot, unit)).join(""), snapshot.source);
+  assert.equal(
+    splitSource(snapshot, 4)
+      .map((unit) => sourceForUnit(snapshot, unit))
+      .join(""),
+    snapshot.source,
+  );
+  assert.equal(
+    splitSource(other, 4)
+      .map((unit) => sourceForUnit(other, unit))
+      .join(""),
+    other.source,
+  );
 });
