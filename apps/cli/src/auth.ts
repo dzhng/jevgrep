@@ -7,7 +7,13 @@ import { providers, isProviderId, type ProviderId } from "@repo/core/providers";
 import { CliError } from "./errors";
 
 export function configDirectory() {
-  return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "jevgrep");
+  return join(
+    process.env.XDG_CONFIG_HOME ||
+      (process.platform === "win32"
+        ? process.env.APPDATA || join(homedir(), "AppData", "Roaming")
+        : join(homedir(), ".config")),
+    "jevgrep",
+  );
 }
 
 function validateKey(raw: string): string {
