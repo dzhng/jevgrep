@@ -16,7 +16,8 @@
   ],
   "os": [
     "darwin",
-    "linux"
+    "linux",
+    "win32"
   ],
   "type": "module",
   "publishConfig": {
