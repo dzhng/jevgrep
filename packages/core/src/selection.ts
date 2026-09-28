@@ -158,98 +158,155 @@ export async function selectFile(
   }
   if (pending.length) groups.push(pending);
   let invalidated = false;
-  for (const group of groups) {
-    try {
-      const prepared = prepare ? await prepare() : {};
-      if (prepared === null) {
-        invalidated = true;
-        selected.length = 0;
-        selectedCoordinates.length = 0;
-        contextSpans.length = 0;
-        leads.clear();
-        break;
+  type GroupResult = {
+    values: Array<{ unit: SourceUnit; value: number }>;
+    contextual: boolean;
+  };
+  const outcomes: Array<GroupResult | EvaluationFailure | undefined> = [];
+  let nextGroup = 0;
+  let stopped = false;
+  let preparationQueue: Promise<void> = Promise.resolve();
+  async function evaluateGroup(group: SourceUnit[]): Promise<GroupResult | undefined> {
+    // Preparation can invalidate shared file evidence; serialize that side effect
+    // while allowing already-prepared provider requests to overlap.
+    const preparation = preparationQueue.then(async () => {
+      if (stopped) return;
+      try {
+        const prepared = prepare ? await prepare() : {};
+        if (prepared === null) {
+          invalidated = true;
+          stopped = true;
+        }
+        return prepared;
+      } catch (error) {
+        if (!(error instanceof EvaluationFailure) || error.kind !== "provider") stopped = true;
+        throw error;
       }
-      const first = Math.max(1, group[0]!.range.startLine - 8),
-        last = Math.min(lines.length, group.at(-1)!.range.endLine + 8);
-      const oversizedContext = [...lines.slice(0, 20), ...lines.slice(first - 1, last)].some(
-        (line) => Buffer.byteLength(line) > sourceUnitBytes,
-      );
-      // Line-only windows cannot describe a partial giant line; send only the parser's bounded byte spans.
-      const context =
-        group.some(partialLine) || oversizedContext
-          ? group
-              .map(
-                (unit) =>
-                  `Source lines ${unit.range.startLine}-${unit.range.endLine}; source bytes ${unit.sourceByteStart}-${unit.sourceByteEnd}:\n${sourceForUnit(snapshot, unit)}`,
-              )
-              .join("\n")
-          : bytes.length <= 16000
-            ? snapshot.source
-            : `Opening context:\n${lines.slice(0, 20).join("\n")}\nSource lines ${first}-${last}:\n${lines.slice(first - 1, last).join("\n")}`;
-      const request = evidenceRequest(
-        query,
-        snapshot.path,
-        context,
-        group.map((unit) => ({ name: unit.name, ...unit.range })),
-        prepared.evidence,
-      );
-      const answers = await evaluator.evaluate(request);
-      const values = group.map((unit, index) => {
-        const values = [
-          answers[`q${index}`],
-          answers[`scope${index}`],
-          ...(prepared.evidence !== undefined ? [answers[`ref${index}`]] : []),
-        ];
-        if (
-          values.some(
-            (value) =>
-              typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1,
-          )
+    });
+    preparationQueue = preparation.then(
+      () => {},
+      () => {},
+    );
+    const prepared = await preparation;
+    if (!prepared) return;
+    if (signal?.aborted) throw new EvaluationFailure("cancelled");
+    if (stopped) return;
+    const first = Math.max(1, group[0]!.range.startLine - 8),
+      last = Math.min(lines.length, group.at(-1)!.range.endLine + 8);
+    const oversizedContext = [...lines.slice(0, 20), ...lines.slice(first - 1, last)].some(
+      (line) => Buffer.byteLength(line) > sourceUnitBytes,
+    );
+    // Line-only windows cannot describe a partial giant line; send only the parser's bounded byte spans.
+    const context =
+      group.some(partialLine) || oversizedContext
+        ? group
+            .map(
+              (unit) =>
+                `Source lines ${unit.range.startLine}-${unit.range.endLine}; source bytes ${unit.sourceByteStart}-${unit.sourceByteEnd}:\n${sourceForUnit(snapshot, unit)}`,
+            )
+            .join("\n")
+        : bytes.length <= 16000
+          ? snapshot.source
+          : `Opening context:\n${lines.slice(0, 20).join("\n")}\nSource lines ${first}-${last}:\n${lines.slice(first - 1, last).join("\n")}`;
+    const request = evidenceRequest(
+      query,
+      snapshot.path,
+      context,
+      group.map((unit) => ({ name: unit.name, ...unit.range })),
+      prepared.evidence,
+    );
+    const answers = await evaluator.evaluate(request);
+    const values = group.map((unit, index) => {
+      const values = [
+        answers[`q${index}`],
+        answers[`scope${index}`],
+        ...(prepared.evidence !== undefined ? [answers[`ref${index}`]] : []),
+      ];
+      if (
+        values.some(
+          (value) => typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1,
         )
-          throw new EvaluationFailure("provider");
-        return { unit, value: Math.max(Math.min(values[0]!, values[1]!), values[2] ?? 0) };
+      )
+        throw new EvaluationFailure("provider");
+      return { unit, value: Math.max(Math.min(values[0]!, values[1]!), values[2] ?? 0) };
+    });
+    return { values, contextual: prepared.evidence !== undefined };
+  }
+  // A small per-file pool overlaps large-file requests without multiplying the
+  // retrieval stage's queued source work by the full provider concurrency.
+  const workers = await Promise.allSettled(
+    Array.from({ length: Math.min(4, groups.length) }, async () => {
+      while (!stopped && nextGroup < groups.length) {
+        const index = nextGroup++;
+        try {
+          if (signal?.aborted) throw new EvaluationFailure("cancelled");
+          outcomes[index] = await evaluateGroup(groups[index]!);
+        } catch (error) {
+          if (!(error instanceof EvaluationFailure)) {
+            stopped = true;
+            throw error;
+          }
+          outcomes[index] = error;
+          if (error.kind !== "provider") stopped = true;
+        }
+      }
+    }),
+  );
+  const failed = workers.find((worker) => worker.status === "rejected");
+  if (failed?.status === "rejected") throw failed.reason;
+  // Only this reducer mutates evidence. Completion timing cannot reorder it,
+  // and a terminal failure leaves later groups' previous evidence untouched.
+  for (const outcome of outcomes) {
+    if (!outcome) continue;
+    if (outcome instanceof EvaluationFailure) {
+      warn(outcome.kind);
+      if (outcome.kind === "provider") providerFailure ??= outcome.message;
+      else break;
+      continue;
+    }
+    const { values } = outcome;
+    for (const { unit, value } of values) {
+      const decisionSpan = { start: unit.sourceByteStart, end: unit.sourceByteEnd };
+      sourceDecisions.set(`${decisionSpan.start}:${decisionSpan.end}`, {
+        range: rangeForSpan(decisionSpan),
+        score: value,
       });
-      for (const { unit, value } of values) {
-        const decisionSpan = { start: unit.sourceByteStart, end: unit.sourceByteEnd };
-        sourceDecisions.set(`${decisionSpan.start}:${decisionSpan.end}`, {
-          range: rangeForSpan(decisionSpan),
+      // Only a valid contextual rejection retracts an earlier selection.
+      // Failed or unprocessed groups retain their previous source spans.
+      if (outcome.contextual && value <= 0.5) {
+        const start = unit.sourceByteStart,
+          end = unit.sourceByteEnd;
+        const retained = selected.flatMap((span) => {
+          if (span.end <= start || span.start >= end) return [span];
+          return [
+            ...(span.start < start ? [{ start: span.start, end: start }] : []),
+            ...(span.end > end ? [{ start: end, end: span.end }] : []),
+          ];
+        });
+        selected.splice(0, selected.length, ...retained);
+      }
+      if (value > 0.5) {
+        const span = { start: unit.sourceByteStart, end: unit.sourceByteEnd };
+        selected.push(span);
+        contextSpans.push(span);
+        if (!partialLine(unit)) selectedCoordinates.push(unit.range);
+      }
+      if (value > 0.25 && !unit.name.endsWith(".context"))
+        addLead({
+          name: unit.name,
+          range: partialLine(unit)
+            ? rangeForSpan({ start: unit.sourceByteStart, end: unit.sourceByteEnd })
+            : unit.range,
           score: value,
         });
-        // Only a valid contextual rejection retracts an earlier selection.
-        // Failed or unprocessed groups retain their previous source spans.
-        if (prepared.evidence !== undefined && value <= 0.5) {
-          const start = unit.sourceByteStart,
-            end = unit.sourceByteEnd;
-          const retained = selected.flatMap((span) => {
-            if (span.end <= start || span.start >= end) return [span];
-            return [
-              ...(span.start < start ? [{ start: span.start, end: start }] : []),
-              ...(span.end > end ? [{ start: end, end: span.end }] : []),
-            ];
-          });
-          selected.splice(0, selected.length, ...retained);
-        }
-        if (value > 0.5) {
-          const span = { start: unit.sourceByteStart, end: unit.sourceByteEnd };
-          selected.push(span);
-          contextSpans.push(span);
-          if (!partialLine(unit)) selectedCoordinates.push(unit.range);
-        }
-        if (value > 0.25 && !unit.name.endsWith(".context"))
-          addLead({
-            name: unit.name,
-            range: partialLine(unit)
-              ? rangeForSpan({ start: unit.sourceByteStart, end: unit.sourceByteEnd })
-              : unit.range,
-            score: value,
-          });
-      }
-    } catch (error) {
-      if (!(error instanceof EvaluationFailure)) throw error;
-      warn(error.kind);
-      if (error.kind === "provider") providerFailure ??= error.message;
-      if (error.kind !== "provider") break;
     }
+  }
+  if (invalidated) {
+    selected.length = 0;
+    selectedCoordinates.length = 0;
+    contextSpans.length = 0;
+    sourceDecisions.clear();
+    leads.clear();
   }
   const chosen = mergeSpans(selected),
     wholeRanges: Range[] = [...selectedCoordinates],

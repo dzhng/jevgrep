@@ -271,3 +271,148 @@ test("scope excludes analogous code while a concrete reference can recover it", 
   expect(second.file.selected).toEqual([{ startLine: 1, endLine: 1 }]);
   expect(second.file.presentationExcerpts?.[0]?.source).toContain("export function helper()");
 });
+
+test("declaration groups overlap while preserving source-order evidence", async () => {
+  const source = Array.from({ length: 16 }, (_, i) => `function f${i}() { return ${i}; }\n`).join(
+    "",
+  );
+  const snapshot = { path: "parallel.ts", contentHash: "parallel", source };
+  const expected = await selectFile(
+    snapshot,
+    "q",
+    0.9,
+    evaluator(() => 0.9),
+  );
+  let releaseFirst!: () => void;
+  const secondStarted = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const completed: string[] = [];
+  const concurrent: Evaluator = {
+    requests: 0,
+    async evaluate(request) {
+      const first = (request.state as { declarations: Declaration[] }).declarations[0]!.name;
+      if (first === "f0") await secondStarted;
+      else releaseFirst();
+      completed.push(first);
+      return Object.fromEntries(Object.keys(request.questions).map((key) => [key, 0.9]));
+    },
+  };
+  const actual = await selectFile(snapshot, "q", 0.9, concurrent);
+  expect(completed).toEqual(["f8", "f0"]);
+  expect(actual).toEqual(expected);
+  expect(actual.file.leads.map((lead) => lead.name)).toEqual(
+    Array.from({ length: 16 }, (_, i) => `f${i}`),
+  );
+  expect(actual.file.sourceDecisions?.map((decision) => decision.range.startLine)).toEqual(
+    Array.from({ length: 16 }, (_, i) => i + 1),
+  );
+}, 1000);
+
+test("preparation invalidation discards in-flight positives and previous evidence", async () => {
+  const source = Array.from({ length: 16 }, (_, i) => `function f${i}() { return ${i}; }\n`).join(
+    "",
+  );
+  const snapshot = { path: "stale.ts", contentHash: "stale", source };
+  const previous = (
+    await selectFile(
+      snapshot,
+      "q",
+      0.9,
+      evaluator(() => 0.9),
+    )
+  ).file;
+  let started!: () => void;
+  const active = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let finish!: () => void;
+  const invalidation = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  let preparations = 0;
+  const result = await selectFile(
+    snapshot,
+    "q",
+    0.9,
+    {
+      requests: 0,
+      async evaluate(request) {
+        started();
+        await invalidation;
+        return Object.fromEntries(Object.keys(request.questions).map((key) => [key, 0.9]));
+      },
+    },
+    async () => {
+      if (++preparations === 1) return {};
+      await active;
+      finish();
+      return null;
+    },
+    previous,
+  );
+  expect(result.file.sourceOmitted).toBe(true);
+  expect(result.file.selected).toEqual([]);
+  expect(result.file.rendered).toEqual([]);
+  expect(result.file.sourceDecisions).toEqual([]);
+  expect(result.file.leads).toEqual([]);
+  expect(result.file.excerpts).toEqual([]);
+});
+
+for (const kind of ["authentication", "cancelled"] as const)
+  test(`${kind} stops admission and drains active groups before returning`, async () => {
+    const source = Array.from({ length: 80 }, (_, i) => `function f${i}() { return ${i}; }\n`).join(
+      "",
+    );
+    let started = 0;
+    let completed = 0;
+    let release!: () => void;
+    const fullWave = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const result = await selectFile(
+      { path: "terminal.ts", contentHash: "terminal", source },
+      "q",
+      0.9,
+      {
+        requests: 0,
+        async evaluate(request) {
+          const index = started++;
+          if (started === 4) release();
+          await fullWave;
+          if (index === 0) throw new EvaluationFailure(kind);
+          // Let the fatal outcome propagate before already-started work finishes.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          completed++;
+          return Object.fromEntries(Object.keys(request.questions).map((key) => [key, 0.9]));
+        },
+      },
+    );
+    expect(started).toBe(4);
+    expect(completed).toBe(3);
+    expect(result.issues).toEqual([{ kind, count: 1 }]);
+    expect(result.file.selected).toEqual([]);
+  });
+
+test("one preparation invalidation prevents duplicate side effects from queued groups", async () => {
+  const source = Array.from({ length: 40 }, (_, i) => `function f${i}() { return ${i}; }\n`).join(
+    "",
+  );
+  let invalidations = 0;
+  const result = await selectFile(
+    { path: "excluded.ts", contentHash: "excluded", source },
+    "q",
+    0.9,
+    evaluator(() => {
+      throw new Error("Excluded source must not be evaluated");
+    }),
+    async () => {
+      await Promise.resolve();
+      invalidations++;
+      return null;
+    },
+  );
+  expect(invalidations).toBe(1);
+  expect(result.file.sourceOmitted).toBe(true);
+  expect(result.file.selected).toEqual([]);
+});
