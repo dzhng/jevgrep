@@ -72,6 +72,65 @@ testIfDocker(
 );
 
 testIfDocker(
+  "excluded paths are never uploaded or returned",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-exclude-"));
+    const sent: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as { questions: Record<string, unknown> };
+        sent.push(JSON.stringify(body));
+        return Response.json({
+          answers: Object.fromEntries(
+            Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.9 }]),
+          ),
+        });
+      },
+    });
+    try {
+      await mkdir(join(root, "src/generated"), { recursive: true });
+      await writeFile(
+        join(root, "src/events.ts"),
+        "export class Events { record(name:string) {return name;} }\n",
+      );
+      await writeFile(
+        join(root, "src/events.test.ts"),
+        'export const excludedTest = "DO_NOT_UPLOAD_TEST";\n',
+      );
+      await writeFile(
+        join(root, "src/generated/client.ts"),
+        'export const excludedClient = "DO_NOT_UPLOAD_GENERATED";\n',
+      );
+      const signal = new AbortController().signal;
+      const evaluator = createEvaluator({
+        apiKey: "fixture",
+        provider: "vercel",
+        fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+        signal,
+      });
+      const result = await retrieve(
+        {
+          root,
+          query: "research event recording",
+          policy: { exclude: ["*.test.ts", "src/generated/"] },
+          signal,
+        },
+        evaluator,
+      );
+      expect(result.status).toBe("complete");
+      expect(result.files.map((file) => file.path)).toEqual(["src/events.ts"]);
+      expect(sent.join("\n")).not.toContain("DO_NOT_UPLOAD");
+      expect(sent.join("\n")).not.toContain("generated");
+    } finally {
+      server.stop(true);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+testIfDocker(
   "newly ignored evidence is withheld from follow-up requests and returned excerpts",
   async () => {
     const root = await mkdtemp(join(tmpdir(), "jg-ignore-change-"));

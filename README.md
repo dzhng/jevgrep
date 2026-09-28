@@ -117,6 +117,8 @@ Searches send eligible source content to Jev through the provider selected durin
 filesystem filtering respects ignore files and excludes hidden, dependency/build,
 binary, and obvious credential files. These filters are not a guarantee that all
 sensitive information has been removed; choose a search root you intend to send.
+To skip paths inside that root for one search, pass `--exclude` with a gitignore pattern
+relative to the root, for example `--exclude '**/*.test.ts' --exclude 'src/generated/'`.
 
 `jg auth` asks for your provider, then saves its key in an owner-only config file.
 Re-running auth replaces that setup; searches always use the saved provider.

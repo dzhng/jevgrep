@@ -11,6 +11,8 @@ export type FilesystemPolicy = {
   noIgnore?: boolean;
   includeDependencies?: boolean;
   includeSensitive?: boolean;
+  /** Root-relative gitignore patterns that only narrow eligibility; repository rules cannot re-admit them. */
+  exclude?: readonly string[];
 };
 export type Snapshot = Readonly<{ path: string; contentHash: string; source: string }>;
 export type FilesystemIssue = {
@@ -126,6 +128,7 @@ export async function createFilesystem(options: FilesystemOptions) {
   const rootStat = await lstat(root, { bigint: true });
   if (!rootStat.isDirectory()) throw new Error("Search root must be a directory");
   const policy = Object.freeze({ ...options.policy });
+  const excludeRules = policy.exclude?.length ? ignore().add(policy.exclude) : undefined;
   const limits = { ...filesystemDefaults, ...options.limits };
   for (const name of [
     "pageSize",
@@ -335,6 +338,9 @@ export async function createFilesystem(options: FilesystemOptions) {
           }
         }
         if (ignored) return excluded("ignored");
+        const rootRelative = components.slice(0, index + 1).join("/");
+        if (excludeRules?.ignores(rootRelative + (stat.isDirectory() ? "/" : "")))
+          return excluded("exclude_pattern");
         if (index === components.length - 1)
           return { status: "eligible", ...named, stat, ancestors };
         if (!stat.isDirectory()) return excluded("not_directory");
