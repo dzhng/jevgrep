@@ -89,7 +89,7 @@ export function createEvaluationCache(options: CacheOptions) {
       await prepare(false);
       handle = await open(
         join(entries, `${key(input)}.json`),
-        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
       );
       const info = await handle.stat();
       if (!info.isFile() || info.size > maxEntryBytes) {
@@ -208,7 +208,7 @@ export function createEvaluationCache(options: CacheOptions) {
       temporary = join(entries, `.pending-${randomUUID()}`);
       handle = await open(
         temporary,
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
         0o600,
       );
       await handle.writeFile(payload);

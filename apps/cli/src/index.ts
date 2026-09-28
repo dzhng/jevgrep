@@ -34,7 +34,13 @@ async function write(text: string) {
 }
 
 function cacheDirectory() {
-  return join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "jevgrep");
+  return join(
+    process.env.XDG_CACHE_HOME ||
+      (process.platform === "win32"
+        ? process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local")
+        : join(homedir(), ".cache")),
+    "jevgrep",
+  );
 }
 
 async function main() {

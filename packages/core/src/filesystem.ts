@@ -143,8 +143,20 @@ export async function createFilesystem(options: FilesystemOptions) {
   }
   const protectedPaths = await Promise.all(
     [
-      join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "jevgrep"),
-      join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "jevgrep"),
+      join(
+        process.env.XDG_CONFIG_HOME ||
+          (process.platform === "win32"
+            ? process.env.APPDATA || join(homedir(), "AppData", "Roaming")
+            : join(homedir(), ".config")),
+        "jevgrep",
+      ),
+      join(
+        process.env.XDG_CACHE_HOME ||
+          (process.platform === "win32"
+            ? process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local")
+            : join(homedir(), ".cache")),
+        "jevgrep",
+      ),
       ...(options.protectedPaths ?? []),
     ].map(async (path) => {
       const absolute = resolve(path);
@@ -203,7 +215,7 @@ export async function createFilesystem(options: FilesystemOptions) {
       // NONBLOCK prevents a concurrent replacement with a FIFO from hanging the process.
       handle = await open(
         identity.absolute,
-        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
       );
       const before = await handle.stat({ bigint: true });
       if (!before.isFile() || !same(identity.stat, before)) return issue("changed", identity.path);
