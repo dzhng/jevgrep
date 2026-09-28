@@ -5,6 +5,7 @@ import { type createEvaluationCache, type CacheInput } from "./cache";
 import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 import { createHash } from "node:crypto";
+import { createRateBudget, estimatedInputTokens } from "./rate-budget";
 
 export type EvaluationRequest = {
   state: Parameters<typeof evaluate>[0]["state"];
@@ -44,11 +45,16 @@ export function createEvaluator(options: {
   const credential =
     options.provider === "kilo" ? createHash("sha256").update(options.apiKey).digest("hex") : "";
   const concurrency = options.concurrency ?? 32;
+  const timeoutMs = options.timeoutMs ?? (options.provider === "typesafe" ? 60_000 : 15_000);
   if (!Number.isSafeInteger(concurrency) || concurrency < 1)
     throw new Error("Concurrency must be a positive integer");
   let requests = 0;
   let cacheHits = 0;
   let cooldownUntil = 0;
+  const rateBudget =
+    options.provider === "typesafe"
+      ? createRateBudget({ tokensPerSecond: 250_000, requestsPerMinute: 1_200 })
+      : undefined;
   const authenticationFailure = new AbortController();
   function assertActive() {
     if (options.signal.aborted) throw new EvaluationFailure("cancelled");
@@ -150,6 +156,7 @@ export function createEvaluator(options: {
         return cached;
       }
       const navigation = policy?.navigation === true;
+      const reservedTokens = rateBudget ? estimatedInputTokens(request) : 0;
       const multiple = Object.keys(request.questions).length > 1;
       let attemptLimit = navigation && multiple ? 1 : 2;
       for (let attempt = 0; attempt < attemptLimit; attempt++) {
@@ -159,18 +166,29 @@ export function createEvaluator(options: {
         const release = await acquire();
         try {
           assertActive();
-          while (cooldownUntil > Date.now()) {
-            try {
-              await delay(Math.min(60_000, cooldownUntil - Date.now()), undefined, {
-                signal: AbortSignal.any([options.signal, authenticationFailure.signal]),
-              });
-            } catch {
-              assertActive();
-              throw new EvaluationFailure("cancelled");
+          // Wait before validating source and before starting the network timeout.
+          // Recheck after validation: another worker may have consumed the budget.
+          for (;;) {
+            const wait = Math.max(
+              cooldownUntil - Date.now(),
+              rateBudget?.waitMs(reservedTokens) ?? 0,
+            );
+            if (wait > 0) {
+              try {
+                await delay(Math.min(60_000, wait), undefined, { signal: stopped });
+              } catch {
+                assertActive();
+                throw new EvaluationFailure("cancelled");
+              }
+              continue;
             }
+            await policy?.beforeAttempt?.();
+            assertActive();
+            if (cooldownUntil > Date.now() || (rateBudget?.waitMs(reservedTokens) ?? 0) > 0)
+              continue;
+            break;
           }
-          await policy?.beforeAttempt?.();
-          assertActive();
+          const reservation = rateBudget?.reserve(reservedTokens);
           try {
             const result = await evaluate({
               model: provider.evaluationModel(preset.model),
@@ -179,9 +197,10 @@ export function createEvaluator(options: {
               abortSignal: AbortSignal.any([
                 options.signal,
                 authenticationFailure.signal,
-                AbortSignal.timeout(options.timeoutMs ?? 15_000),
+                AbortSignal.timeout(timeoutMs),
               ]),
             });
+            reservation?.reconcile(result.usage.inputTokens);
             const scores = Object.fromEntries(
               Object.keys(request.questions).map((id) => {
                 const answer = result.answers[id];
@@ -229,7 +248,7 @@ export function createEvaluator(options: {
               const description = diagnostic
                 ? `HTTP ${diagnostic.statusCode}${diagnostic.message ? `: ${diagnostic.message}` : ""}`
                 : name === "TimeoutError"
-                  ? `Request timed out after ${options.timeoutMs ?? 15_000} ms`
+                  ? `Request timed out after ${timeoutMs} ms`
                   : APICallError.isInstance(error) && error.statusCode === undefined
                     ? "Network request failed (connection unavailable or reset)"
                     : "Invalid or incomplete provider response";

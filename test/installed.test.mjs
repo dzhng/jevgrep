@@ -1191,7 +1191,7 @@ test("installed Kilo organization selection changes billing context and cache id
     );
     const warm = fixture.requests.length;
     complete(await fixture.run([query]));
-    assertCachedRequestsAreReused(fixture.requests, warm);
+    assertCachedRequestsAreReused(fixture.requests.slice(before), warm - before);
   }
 });
 
