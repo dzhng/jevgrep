@@ -42,6 +42,8 @@ testInDocker("interactive auth hides input and exits 130 on interruption", async
   await withCli(async ({ home }) => {
     for (const mode of [
       "save",
+      "save-kilo",
+      "save-kilo-org",
       "interrupt-provider",
       "interrupt-key",
       "cancel-provider",
@@ -73,10 +75,13 @@ try:
     wait_for(b"Choose your Jev provider")
     mode = sys.argv[2]
     if not mode.endswith("provider"):
-        os.write(master, b"\\x1b[B\\x1b[B\\r")
+        os.write(master, (b"\\x1b[B" * (4 if mode.startswith("save-kilo") else 2)) + b"\\r")
         wait_for(b"API key")
-    if mode == "save":
+    if mode.startswith("save"):
         os.write(master, b"pty-fixture-secret\\r")
+        if mode.startswith("save-kilo"):
+            wait_for(b"Organization ID")
+            os.write(master, (b"123e4567-e89b-42d3-a456-426614174000" if mode == "save-kilo-org" else b"") + b"\\r")
     elif mode.startswith("cancel"):
         os.write(master, b"\\x03")
     else:
@@ -103,14 +108,17 @@ finally:
         { env: { ...process.env, HOME: home, XDG_CONFIG_HOME: home } },
       );
       const result = JSON.parse(stdout);
-      expect(result.code).toBe(mode === "save" ? 0 : 130);
+      expect(result.code).toBe(mode.startsWith("save") ? 0 : 130);
       expect(result.stderr).toBe("");
       expect(result.stdout + result.echo).not.toContain("pty-fixture-secret");
-      expect(result.stdout).toContain(mode === "save" ? "key saved" : "Interrupted");
-      if (mode === "save") {
+      expect(result.stdout).toContain(mode.startsWith("save") ? "key saved" : "Interrupted");
+      if (mode.startsWith("save")) {
         expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
-          provider: "openrouter",
+          provider: mode.startsWith("save-kilo") ? "kilo" : "openrouter",
           apiKey: "pty-fixture-secret",
+          ...(mode === "save-kilo-org"
+            ? { organizationId: "123e4567-e89b-42d3-a456-426614174000" }
+            : {}),
         });
         expect(result.stdout.indexOf("Vercel AI Gateway")).toBeLessThan(
           result.stdout.indexOf("TypeSafe"),

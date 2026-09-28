@@ -2,9 +2,10 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { isCancel, password, select } from "@clack/prompts";
+import { isCancel, password, select, text } from "@clack/prompts";
 import { providers, isProviderId, type ProviderId } from "@repo/core/providers";
 import { CliError } from "./errors";
+import { isOrganizationId } from "./args";
 
 export function configDirectory() {
   return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "jevgrep");
@@ -18,9 +19,13 @@ function validateKey(raw: string): string {
   return key;
 }
 
-export type Credentials = { provider: ProviderId; apiKey: string };
+export type Credentials = { provider: ProviderId; apiKey: string; organizationId?: string };
 
-export async function authenticate(provider: ProviderId | undefined, signal: AbortSignal) {
+export async function authenticate(
+  provider: ProviderId | undefined,
+  signal: AbortSignal,
+  organizationId?: string,
+) {
   let key: string;
   if (provider !== undefined) {
     const chunks: Buffer[] = [];
@@ -63,6 +68,17 @@ export async function authenticate(provider: ProviderId | undefined, signal: Abo
       throw new DOMException("Interrupted", "AbortError");
     }
     key = validateKey(answer);
+    if (provider === "kilo") {
+      const selectedOrganization = await text({
+        message: "Organization ID (optional; leave blank for key's default account)",
+        validate: (value) =>
+          value && !isOrganizationId(value) ? "Enter a valid organization UUID." : undefined,
+        output: process.stdout,
+        signal,
+      });
+      if (isCancel(selectedOrganization)) throw new DOMException("Interrupted", "AbortError");
+      organizationId = selectedOrganization || undefined;
+    }
   }
   const directory = configDirectory();
   signal.throwIfAborted();
@@ -70,10 +86,15 @@ export async function authenticate(provider: ProviderId | undefined, signal: Abo
   await chmod(directory, 0o700);
   const temporary = join(directory, `.credentials-${randomUUID()}.json`);
   try {
-    await writeFile(temporary, JSON.stringify({ provider, apiKey: key }) + "\n", {
-      mode: 0o600,
-      flag: "wx",
-    });
+    await writeFile(
+      temporary,
+      JSON.stringify({ provider, apiKey: key, ...(organizationId ? { organizationId } : {}) }) +
+        "\n",
+      {
+        mode: 0o600,
+        flag: "wx",
+      },
+    );
     signal.throwIfAborted();
     await rename(temporary, join(directory, "credentials.json"));
   } finally {
@@ -92,7 +113,14 @@ export async function loadCredentials(): Promise<Credentials> {
     }
     const provider = Object.hasOwn(credentials, "provider") ? credentials.provider : "vercel";
     if (!isProviderId(provider)) throw new CliError("Invalid provider. Run jg auth again.");
-    return { provider, apiKey: validateKey(credentials.apiKey) };
+    const organizationId = credentials.organizationId;
+    if (organizationId !== undefined && (provider !== "kilo" || !isOrganizationId(organizationId)))
+      throw new CliError("Invalid organization ID. Run jg auth again.");
+    return {
+      provider,
+      apiKey: validateKey(credentials.apiKey),
+      ...(organizationId ? { organizationId } : {}),
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new CliError("Run jg auth or use jg auth --provider NAME --stdin.");

@@ -4,6 +4,7 @@ import { providers, type ProviderId } from "./providers";
 import { type createEvaluationCache, type CacheInput } from "./cache";
 import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
+import { createHash } from "node:crypto";
 
 export type EvaluationRequest = {
   state: Parameters<typeof evaluate>[0]["state"];
@@ -30,6 +31,7 @@ export class EvaluationFailure extends Error {
 export function createEvaluator(options: {
   provider: ProviderId;
   apiKey: string;
+  organizationId?: string;
   cache?: ReturnType<typeof createEvaluationCache>;
   policyVersion?: string;
   fetch?: typeof fetch;
@@ -39,6 +41,8 @@ export function createEvaluator(options: {
   concurrency?: number;
 }) {
   const preset = providers[options.provider];
+  const credential =
+    options.provider === "kilo" ? createHash("sha256").update(options.apiKey).digest("hex") : "";
   const concurrency = options.concurrency ?? 32;
   if (!Number.isSafeInteger(concurrency) || concurrency < 1)
     throw new Error("Concurrency must be a positive integer");
@@ -74,6 +78,9 @@ export function createEvaluator(options: {
   const provider = createTypeSafeAi({
     apiKey: options.apiKey,
     baseURL: preset.baseURL,
+    ...(options.provider === "kilo" && options.organizationId
+      ? { headers: { "X-KiloCode-OrganizationId": options.organizationId } }
+      : {}),
     fetch: async (input, init) => {
       assertActive();
       if (requests >= (options.requestLimit ?? 50_000))
@@ -116,6 +123,12 @@ export function createEvaluator(options: {
           model: preset.model,
           provider: options.provider,
           endpoint: preset.baseURL,
+          ...(options.provider === "kilo"
+            ? {
+                organizationId: options.organizationId ?? "",
+                credential,
+              }
+            : {}),
           protocol: "typesafe-ai-3.0.8",
           policyVersion: options.policyVersion ?? "1",
           parserVersion: "cpython-3.11.3-pyodide-0.25.1-ts-5.9.3",

@@ -17,6 +17,7 @@ const presets = [
   ["https://ai-gateway.vercel.sh/typesafe/v1", "typesafe-ai/jev"],
   ["https://api.typesafe.ai/v1", "jev-1.13.0"],
   ["https://openrouter.ai/api/v1", "typesafe/jev-1.13"],
+  ["https://api.kilo.ai/api/gateway/typesafe/v1", "typesafe/jev-1.13"],
 ];
 async function fixture(t, handler) {
   let calls = 0;
@@ -48,9 +49,10 @@ for (const [baseURL, modelId] of presets) {
       res.setHeader("content-type", "application/json");
       res.end(
         JSON.stringify({
+          id: "fixture-evaluation",
           model: modelId,
           answers: { q1: { type: "noul", noul: 0.83 }, q0: { type: "noul", noul: 0.12 } },
-          usage: { input_tokens: 12, output_tokens: 2 },
+          usage: { input_tokens: 12, output_tokens: 2, cost: 0.0001 },
         }),
       );
     });

@@ -46,6 +46,11 @@ const providers = {
     url: "https://opencode.ai/zen/v1/systemone",
     model: "jev-1.13",
   },
+  kilo: {
+    label: "Kilo Gateway",
+    url: "https://api.kilo.ai/api/gateway/typesafe/v1/systemone",
+    model: "typesafe/jev-1.13",
+  },
 };
 const fixtureKey = "installed-http-fixture-key";
 const forbidden = "INSTALLED_FIXTURE_IGNORED_CONTENT_MUST_NEVER_UPLOAD";
@@ -62,6 +67,7 @@ async function context(t, mode = "healthy", executable = binary) {
   let expectedQuery = query;
   let expectedProvider = "vercel";
   let expectedKey = fixtureKey;
+  let expectedOrganizationId;
   const secrets = new Set([fixtureKey]);
   const scratch = await mkdtemp(join(tmpdir(), "jg-installed-"));
   const tree = join(scratch, "repository");
@@ -122,6 +128,7 @@ async function context(t, mode = "healthy", executable = binary) {
         request.headers.authorization === `Bearer ${expectedKey}`,
         "Saved key must authenticate the request",
       );
+      assert.equal(request.headers["x-kilocode-organizationid"], expectedOrganizationId);
       assert.match(request.headers["content-type"] ?? "", /^application\/json/);
       const chunks = [];
       let bytes = 0;
@@ -222,10 +229,12 @@ async function context(t, mode = "healthy", executable = binary) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
+          id: "installed-fixture-evaluation",
+          model: preset.model,
           answers: Object.fromEntries(
             ids.map((id, index) => [id, { type: "noul", noul: probabilities[index] }]),
           ),
-          usage: { input_tokens: 1, output_tokens: 1 },
+          usage: { input_tokens: 1, output_tokens: 1, cost: 0.0001 },
           warnings: [{ type: "other", message: "installed-fixture-warning" }],
         }),
       );
@@ -320,9 +329,10 @@ async function context(t, mode = "healthy", executable = binary) {
     config,
     credentialDirectory,
     requests,
-    expectProvider(provider, key = fixtureKey) {
+    expectProvider(provider, key = fixtureKey, organizationId) {
       expectedProvider = provider;
       expectedKey = key;
+      expectedOrganizationId = organizationId;
       secrets.add(key);
     },
     async removeCredentials() {
@@ -1156,6 +1166,68 @@ for (const [provider, preset] of Object.entries(providers))
     assert.ok(failed.stdout.includes(providers[replacement].label));
     assert.equal(fixture.requests.at(-1).provider, replacement);
   });
+
+test("installed Kilo organization selection changes billing context and cache identity", async (t) => {
+  const fixture = await context(t);
+  const key = "installed-kilo-org-key";
+  const orgA = "123e4567-e89b-42d3-a456-426614174000";
+  const orgB = "123e4567-e89b-42d3-a456-426614174001";
+  for (const organizationId of [orgA, orgB, undefined]) {
+    const args = ["auth", "--provider", "kilo", "--stdin"];
+    if (organizationId) args.push("--org-id", organizationId);
+    const auth = await fixture.run(args, {}, false, key + "\n");
+    assert.equal(auth.code, 0, auth.stdout);
+    assert.deepEqual(JSON.parse(await readFile(fixture.credentials, "utf8")), {
+      provider: "kilo",
+      apiKey: key,
+      ...(organizationId ? { organizationId } : {}),
+    });
+    fixture.expectProvider("kilo", key, organizationId);
+    const before = fixture.requests.length;
+    complete(await fixture.run([query]));
+    assert.ok(
+      fixture.requests.length > before,
+      "Switching organizations must not reuse cached answers",
+    );
+    const warm = fixture.requests.length;
+    complete(await fixture.run([query]));
+    assertCachedRequestsAreReused(fixture.requests, warm);
+  }
+});
+
+test("installed invalid Kilo organization IDs preserve saved credentials", async (t) => {
+  const fixture = await context(t);
+  const original = await readFile(fixture.credentials, "utf8");
+  for (const args of [
+    ["auth", "--provider", "kilo", "--org-id", "invalid", "--stdin"],
+    ["auth", "--provider", "vercel", "--org-id", "123e4567-e89b-42d3-a456-426614174000", "--stdin"],
+  ]) {
+    const result = await fixture.run(args, {}, false, "fixture-key\n");
+    assert.equal(result.code, 1, result.stdout);
+    assert.equal(await readFile(fixture.credentials, "utf8"), original);
+  }
+  assert.equal(fixture.requests.length, 0);
+});
+
+test("installed invalid saved organization IDs fail before provider requests", async (t) => {
+  const fixture = await context(t);
+  for (const credentials of [
+    { provider: "kilo", apiKey: fixtureKey, organizationId: "invalid" },
+    {
+      provider: "vercel",
+      apiKey: fixtureKey,
+      organizationId: "123e4567-e89b-42d3-a456-426614174000",
+    },
+  ]) {
+    const original = JSON.stringify(credentials) + "\n";
+    await writeFile(fixture.credentials, original);
+    const result = await fixture.run(["doctor"]);
+    assert.equal(result.code, 1, result.stdout);
+    assert.match(result.stdout, /credentials/);
+    assert.equal(await readFile(fixture.credentials, "utf8"), original);
+  }
+  assert.equal(fixture.requests.length, 0);
+});
 
 test("installed legacy credentials use Vercel without rewriting saved bytes", async (t) => {
   const fixture = await context(t);

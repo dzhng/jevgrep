@@ -27,6 +27,13 @@ For unattended setup, pipe the key from your secret manager to:
 jg auth --provider opencode --stdin
 ```
 
+For Kilo Gateway, choose `kilo` in interactive auth or pipe a Kilo key using
+`jg auth --provider kilo --stdin`. To bill an organization, add
+`--org-id YOUR-ORGANIZATION-UUID` to that auth command, or enter the ID at the
+interactive prompt. Without an ID, the gateway uses the account bound to your
+key. The key must be accepted by Kilo Gateway and have Jev access and credits;
+an organization ID requires membership and access to the Jev model.
+
 Both options are required for piped setup. Credentials are saved under
 `$XDG_CONFIG_HOME/jevgrep/credentials.json`, or `~/.config/jevgrep/credentials.json`.
 Existing saved records without a provider still mean Vercel, without a migration.

@@ -47,7 +47,7 @@ async function main() {
       process.exitCode = await installSkill(command, controller.signal);
       return;
     case "auth":
-      return authenticate(command.provider, controller.signal);
+      return authenticate(command.provider, controller.signal, command.organizationId);
     case "cache-clear": {
       const { createEvaluationCache } = await import("@repo/core");
       const cache = createEvaluationCache({ directory: cacheDirectory() });
