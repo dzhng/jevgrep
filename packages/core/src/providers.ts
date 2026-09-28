@@ -19,6 +19,13 @@ export const providers = {
     baseURL: "https://opencode.ai/zen/v1",
     model: "jev-1.13",
   },
+  // A self-hosted or otherwise System One-compatible endpoint. This is the same
+  // TYPESAFE_BASE_URL variable typesafe-sdk uses for its base URL.
+  local: {
+    label: "Self-hosted System One",
+    baseURL: process.env.TYPESAFE_BASE_URL ?? "http://127.0.0.1:8009/v1",
+    model: process.env.TYPESAFE_MODEL ?? "jev-latest",
+  },
 } as const;
 
 export type ProviderId = keyof typeof providers;
