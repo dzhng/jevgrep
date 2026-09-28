@@ -15,6 +15,7 @@ export async function installSkill(
     const child = spawn("npx", args, {
       // Preserve installer prompts while keeping all CLI output on stdout.
       stdio: ["inherit", process.stdout, process.stdout],
+      shell: process.platform === "win32",
       signal,
       killSignal: "SIGINT",
     });
