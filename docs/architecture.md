@@ -9,7 +9,13 @@ is data, never instructions.
 Hierarchical traversal uses directory metadata and content previews to decide where
 to explore. It does not upload the entire tree first. Keep files that pass relevance
 criteria without a fixed top-N limit. Unread descendants and failed classifications
-remain unknown; partial discovery must be reported honestly.
+remain unknown; partial discovery must be reported honestly. Navigation batches
+apply backpressure while source is read, so a wide level does not retain all its
+source text before evaluation. Split retries share the scoring queue; they
+partition existing source rather than admitting more unbounded work.
+
+Discovery result-processing errors propagate after active evaluations drain; they
+are not reported as provider failures. Admission stops when such an error occurs.
 
 Source relevance and scope are separate judgments. The current implementation
 counts even when it contains the bug. Contextual follow-up can recover concretely
