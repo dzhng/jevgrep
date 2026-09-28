@@ -3,7 +3,8 @@ import { authenticate, configDirectory, loadCredentials } from "./auth";
 import { providers } from "@repo/core/providers";
 import { help, parseCommand } from "./args";
 import { CliError } from "./errors";
-import { renderResult } from "./render";
+import { renderInventory, renderResult } from "./render";
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { version } from "../package.json";
@@ -93,6 +94,22 @@ async function main() {
           `Jev connection check failed through ${providers[credentials.provider].label}. Check your saved key, model access, and network.`,
         );
       }
+      return;
+    }
+    case "files": {
+      if (!(await stat(command.root).catch(() => undefined))?.isDirectory())
+        throw new CliError("The root must be an existing directory.");
+      const { inventory } = await import("@repo/core");
+      const result = await inventory({
+        root: command.root,
+        policy: command.policy,
+        signal: controller.signal,
+        protectedPaths: [configDirectory(), cacheDirectory()],
+      });
+      if (pipeClosed) return;
+      await write(renderInventory(result));
+      process.exitCode =
+        result.status === "interrupted" ? 130 : result.status === "incomplete" ? 2 : 0;
       return;
     }
     case "search": {

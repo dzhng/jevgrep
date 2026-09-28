@@ -33,6 +33,8 @@ Existing saved records without a provider still mean Vercel, without a migration
 API-key, endpoint, and model environment overrides are ignored; users who only
 configured an environment key must run auth. There is no automatic fallback or
 per-search provider override. Searches send eligible source to the saved service.
+Run `jg files ./project` first to see how many files and bytes that root makes
+eligible and how many paths each filter skips; it needs no key and sends nothing.
 Evaluation answers are cached locally; `jg --help` describes cache controls.
 
 For a slow or unstable connection, try `jg "question" ./project --concurrency 4`

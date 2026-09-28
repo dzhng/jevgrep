@@ -20,9 +20,11 @@ export type FilesystemIssue = {
 type Excluded = { status: "excluded"; reason: string };
 type Issue = { status: "issue"; issue: FilesystemIssue };
 export type SnapshotResult = { status: "ok"; snapshot: Snapshot } | Excluded | Issue;
-export type DirectoryEntry = { path: string; kind: "file" | "directory" };
+export type DirectoryEntry = { path: string; kind: "file" | "directory"; bytes?: number };
 export type DirectoryPage = {
   entries: DirectoryEntry[];
+  /** Per-reason counts of entries this page skipped; a skipped directory counts once. */
+  excluded: Record<string, number>;
   nextCursor?: string;
   issues: FilesystemIssue[];
 };
@@ -389,20 +391,21 @@ export async function createFilesystem(options: FilesystemOptions) {
   /** Consume a cursor serially; closeCursor releases a deliberately pruned directory without draining it. */
   async function listPage(path = ".", token?: string): Promise<DirectoryPage> {
     const entries: DirectoryEntry[] = [];
+    const excluded: Record<string, number> = {};
     const issues: FilesystemIssue[] = [];
     const named = pathName(path);
-    if (!named) return { entries, issues };
+    if (!named) return { entries, excluded, issues };
     let cursor = token ? cursors.get(token) : undefined;
     if (token && (!cursor || cursor.directory !== named.path))
       throw new Error("Invalid directory cursor");
     try {
       if (!cursor) {
         const admitted = await eligibility(path);
-        if (admitted.status === "issue") return { entries, issues: [admitted.issue] };
+        if (admitted.status === "issue") return { entries, excluded, issues: [admitted.issue] };
         if (admitted.status !== "eligible" || !admitted.stat.isDirectory())
-          return { entries, issues };
+          return { entries, excluded, issues };
         if (cursors.size + openingDirectories >= limits.maxOpenDirectories)
-          return { entries, issues: [issue("resource_limit", named.path).issue] };
+          return { entries, excluded, issues: [issue("resource_limit", named.path).issue] };
         openingDirectories++;
         try {
           cursor = {
@@ -415,7 +418,7 @@ export async function createFilesystem(options: FilesystemOptions) {
         }
         if (stopped(named.path)) {
           await cursor.handle.close();
-          return { entries, issues: [issue("interrupted", named.path).issue] };
+          return { entries, excluded, issues: [issue("interrupted", named.path).issue] };
         }
         token = randomUUID();
         cursors.set(token, cursor);
@@ -423,7 +426,7 @@ export async function createFilesystem(options: FilesystemOptions) {
       if (stopped(named.path) || !(await stable(cursor.identity))) {
         issues.push(issue(stopped(named.path) ? "interrupted" : "changed", named.path).issue);
         await discard(token!);
-        return { entries, issues };
+        return { entries, excluded, issues };
       }
       for (let scanned = 0; scanned < limits.pageSize; scanned++) {
         const entry = await cursor.handle.read();
@@ -431,8 +434,12 @@ export async function createFilesystem(options: FilesystemOptions) {
           const unchanged = await stable(cursor.identity);
           await discard(token!);
           return unchanged
-            ? { entries, issues }
-            : { entries: [], issues: [...issues, issue("changed", named.path).issue] };
+            ? { entries, excluded, issues }
+            : {
+                entries: [],
+                excluded: {},
+                issues: [...issues, issue("changed", named.path).issue],
+              };
         }
         const relativePath = named.path ? `${named.path}/${entry.name}` : entry.name;
         const admitted = await eligibility(relativePath);
@@ -440,22 +447,32 @@ export async function createFilesystem(options: FilesystemOptions) {
           issues.push(admitted.issue);
           if (admitted.issue.kind === "interrupted") {
             await discard(token!);
-            return { entries, issues };
+            return { entries, excluded, issues };
           }
         } else if (admitted.status === "eligible")
-          entries.push({
-            path: relativePath,
-            kind: admitted.stat.isDirectory() ? "directory" : "file",
-          });
+          entries.push(
+            admitted.stat.isDirectory()
+              ? { path: relativePath, kind: "directory" }
+              : { path: relativePath, kind: "file", bytes: Number(admitted.stat.size) },
+          );
+        else excluded[admitted.reason] = (excluded[admitted.reason] ?? 0) + 1;
       }
       if (!(await stable(cursor.identity))) {
         await discard(token!);
-        return { entries: [], issues: [...issues, issue("changed", named.path).issue] };
+        return {
+          entries: [],
+          excluded: {},
+          issues: [...issues, issue("changed", named.path).issue],
+        };
       }
-      return { entries, nextCursor: token, issues };
+      return { entries, excluded, nextCursor: token, issues };
     } catch (error) {
       if (token) await discard(token);
-      return { entries: [], issues: [...issues, issue(errorKind(error), named.path).issue] };
+      return {
+        entries: [],
+        excluded: {},
+        issues: [...issues, issue(errorKind(error), named.path).issue],
+      };
     }
   }
   async function close() {

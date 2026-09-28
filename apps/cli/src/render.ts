@@ -1,4 +1,4 @@
-import type { RetrievalResult } from "@repo/core";
+import type { Inventory, RetrievalResult } from "@repo/core";
 
 function quote(value: string): string {
   return JSON.stringify(value).replace(
@@ -98,4 +98,47 @@ export function renderResult(
     );
   }
   return lines.join("\n") + "\n\nEnd context.\n";
+}
+
+function size(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (unit < units.length - 1 && Math.round(value * 10) / 10 >= 1024) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(1)} ${units[unit]}`;
+}
+
+/** Counts only; listing every eligible path would flood stdout on real repositories. */
+export function renderInventory(inventory: Inventory, maxDirectories = 20): string {
+  const count = (value: number) => value.toLocaleString("en-US");
+  const files = (value: number) => `${count(value)} ${value === 1 ? "file" : "files"}`;
+  const excluded = Object.entries(inventory.excluded).sort(
+    ([a, x], [b, y]) => y - x || a.localeCompare(b),
+  );
+  const lines = [
+    `Jevgrep files: ${files(inventory.files)} eligible (${size(inventory.bytes)})${inventory.status === "complete" ? "" : `; ${inventory.status === "interrupted" ? "interrupted" : "listing incomplete"}`}. No provider requests were made.`,
+    "A search reads only what it explores and still skips binary, credential-like, or over-16 MiB files.",
+    ...(excluded.length
+      ? [
+          `Skipped paths (a skipped directory counts once): ${excluded.map(([reason, value]) => `${quote(reason)} ${count(value)}`).join("; ")}.`,
+        ]
+      : []),
+    ...inventory.issues.map(({ kind, count: value }) => `Issue: ${quote(kind)}: ${value}`),
+    ...inventory.directories
+      .slice(0, maxDirectories)
+      .map(
+        (directory) =>
+          `- ${quote(directory.path)} — ${files(directory.files)}, ${size(directory.bytes)}`,
+      ),
+    ...(inventory.directories.length > maxDirectories
+      ? [
+          `- ${count(inventory.directories.length - maxDirectories)} more ${inventory.directories.length - maxDirectories === 1 ? "directory" : "directories"}`,
+        ]
+      : []),
+  ];
+  return lines.join("\n") + "\n\nEnd files.\n";
 }

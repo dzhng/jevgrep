@@ -79,3 +79,20 @@ test("concurrency is a positive search-only limit and does not change cache poli
   for (const args of [["doctor"], ["auth"], ["skill"], ["cache", "clear"]])
     expect(() => parseCommand([...args, "--concurrency", "2"])).toThrow();
 });
+
+test("files takes an optional root and only the filesystem policy flags", () => {
+  expect(parseCommand(["files"])).toEqual({ kind: "files", root: process.cwd(), policy: {} });
+  expect(parseCommand(["files", "src", "--hidden", "--no-ignore"])).toEqual({
+    kind: "files",
+    root: "src",
+    policy: { hidden: true, noIgnore: true },
+  });
+  for (const args of [
+    ["files", "a", "b"],
+    ["files", "--no-cache"],
+    ["files", "--concurrency", "2"],
+    ["files", "--max-source-bytes", "1"],
+    ["files", "--provider", "vercel"],
+  ])
+    expect(() => parseCommand(args)).toThrow("Usage: jg files");
+});

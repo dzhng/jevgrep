@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { RetrievalResult } from "@repo/core";
-import { renderResult } from "../src/render";
+import { renderInventory, renderResult } from "../src/render";
 
 function result(): RetrievalResult {
   return {
@@ -160,4 +160,61 @@ test("query-aware priority controls both file order and the source byte budget",
     designOutput.indexOf('- "src/telemetry.ts"'),
   );
   expect(designOutput).toContain('Source block "specs/telemetry.md"');
+});
+
+test("file inventories report counts, sizes, skips and incomplete listings", () => {
+  const output = renderInventory(
+    {
+      status: "incomplete",
+      files: 1234,
+      bytes: 3 * 1024 ** 2,
+      directories: [
+        { path: "src", files: 1233, bytes: 3 * 1024 ** 2 - 10 },
+        { path: "line\nbreak", files: 1, bytes: 10 },
+      ],
+      excluded: { ignored: 2, hidden: 7 },
+      issues: [{ kind: "resource_limit", count: 1 }],
+    },
+    1,
+  );
+  expect(output).toBe(
+    [
+      "Jevgrep files: 1,234 files eligible (3.0 MiB); listing incomplete. No provider requests were made.",
+      "A search reads only what it explores and still skips binary, credential-like, or over-16 MiB files.",
+      'Skipped paths (a skipped directory counts once): "hidden" 7; "ignored" 2.',
+      'Issue: "resource_limit": 1',
+      '- "src" — 1,233 files, 3.0 MiB',
+      "- 1 more directory",
+      "",
+      "End files.",
+      "",
+    ].join("\n"),
+  );
+  expect(
+    renderInventory({ ...empty(), directories: [{ path: "line\nbreak", files: 1, bytes: 10 }] }),
+  ).toContain('- "line\\nbreak" — 1 file, 10 B');
+});
+
+function empty() {
+  return {
+    status: "complete" as const,
+    files: 0,
+    bytes: 0,
+    directories: [],
+    excluded: {},
+    issues: [],
+  };
+}
+
+test("inventory sizes choose their unit after rounding", () => {
+  const total = (bytes: number) =>
+    renderInventory({ ...empty(), bytes })
+      .split("\n")[0]!
+      .match(/\((.+)\)/)![1];
+  expect([1023, 1024, 1024 ** 2 - 1, 5 * 1024 ** 3].map(total)).toEqual([
+    "1023 B",
+    "1.0 KiB",
+    "1.0 MiB",
+    "5.0 GiB",
+  ]);
 });

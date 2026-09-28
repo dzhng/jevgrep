@@ -19,6 +19,7 @@ jg "question" [root]              # root defaults to cwd
 jg auth [--stdin]                # hidden interactive input or explicit pipe
 jg doctor                       # synthetic Gateway connectivity/answer check
 jg cache clear                  # idempotently clear Jevgrep cache
+jg files [root]                 # count eligible files; no provider key or request
 jg skill                        # invoke npx skills for explicit installation
 jg --help
 jg --version
@@ -27,6 +28,7 @@ jg --version
 Search flags: `--no-cache`, `--max-source-bytes N` (0 = unlimited excerpts),
 `--hidden`, `--no-ignore`, `--include-dependencies`, `--include-sensitive`.
 Each broadens only its named policy; no automatic blanket unrestricted switch.
+The same four policy flags apply to `jg files`.
 A root beginning with `-` is accepted after `--`. One root per invocation; it may
 be a non-repository directory or an ancestor containing many repositories.
 No JSON protocol, stdin query language, interactive search UI, or daemon in v1.
@@ -39,7 +41,8 @@ status. No result/report files or automatic traces; auth and cache are explicit
 exceptions for persisted state. Evaluation tooling captures stdout externally.
 
 Exit codes: 0 completed (including healthy empty result), 1 invocation/setup/fatal
-failure, 2 incomplete search (even if zero useful files), 130 user interrupt.
+failure, 2 incomplete search or `jg files` listing (even if zero useful files),
+130 user interrupt.
 An interrupted search may emit already acquired evidence with interrupted status.
 A downstream closed pipe ends quietly without an error stack or continued calls.
 
@@ -48,7 +51,7 @@ key takes precedence over saved key. An explicitly empty environment key disable
 saved credentials, supporting isolated tests. Trim surrounding whitespace, then
 reject internal whitespace consistently; never echo keys in either stream or provider errors. Auth saves
 without a network call; doctor verifies a synthetic expected answer. Help/
-version/skill/cache-clear require no provider key. Bound auth stdin input.
+version/skill/cache-clear/files require no provider key. Bound auth stdin input.
 
 The canonical skill source is `skills/jevgrep/SKILL.md` in this repository,
 discoverable by the skills CLI installer. Ship that same file with the npm package;
