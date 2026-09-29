@@ -16,6 +16,8 @@ const sourceUnitBytes = 24_000;
 export type SelectionResult = {
   file: FileEvidence;
   declarations: Array<Pick<SourceUnit, "name" | "range">>;
+  /** Declaration requests this file needs per pass; sequential selection finished in this order. */
+  groups: number;
   issues: Array<{ kind: string; count: number }>;
   providerFailure?: string;
 };
@@ -406,6 +408,7 @@ export async function selectFile(
   return {
     file,
     declarations: units.map(({ name, range }) => ({ name, range })),
+    groups: groups.length,
     issues: [...issues].map(([kind, count]) => ({ kind, count })),
     providerFailure,
   };

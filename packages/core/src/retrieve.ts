@@ -32,6 +32,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
   const candidates = new Map<string, { path: string; contentHash: string; score: number }>();
   const files = new Map<string, FileEvidence>();
   const declarations = new Map<string, SelectionResult["declarations"]>();
+  const groupCounts = new Map<string, number>();
   const visited = new Set<string>();
   const pruned = new Map<string, NavigationItem>();
   const previews = new Map<string, FilePreview>();
@@ -555,6 +556,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
           );
           files.set(candidate.path, selection.file);
           declarations.set(candidate.path, selection.declarations);
+          groupCounts.set(candidate.path, selection.groups);
           for (const entry of selection.issues)
             if (entry.kind !== "source-invalid")
               issue(entry.kind, entry.count, selection.providerFailure);
@@ -569,8 +571,13 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       const selectEvidence = async () => {
         await select();
         const evidence: Evidence[] = [];
-        // Donors follow selection completion order; concurrent completion can affect request context.
-        for (const path of declarations.keys()) {
+        // Donor order is part of every follow-up request and its cache key. Files are selected
+        // concurrently, so completion order depends on network timing; donors use the order in
+        // which sequential selection would finish them instead: fewer groups first, then path.
+        const donors = [...declarations.keys()].sort(
+          (a, b) => groupCounts.get(a)! - groupCounts.get(b)! || (a < b ? -1 : a > b ? 1 : 0),
+        );
+        for (const path of donors) {
           const candidate = candidates.get(path)!;
           if (stop || input.signal.aborted) break;
           if (!files.get(candidate.path)!.excerpts.length) continue;

@@ -582,3 +582,52 @@ testIfDocker(
   },
   120_000,
 );
+
+testIfDocker(
+  "cross-file evidence order does not depend on which file finishes selection first",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-donor-order-"));
+    try {
+      // Twenty declarations need three groups; one declaration needs one.
+      await writeFile(
+        join(root, "many.ts"),
+        Array.from({ length: 20 }, (_, i) => `export function many${i}() {return ${i};}\n`).join(
+          "",
+        ),
+      );
+      await writeFile(join(root, "few.ts"), "export function few() {return 0;}\n");
+      const donorOrders = async (slow: string) => {
+        const orders: string[][] = [];
+        await retrieve(
+          { root, query: "event behavior", signal: new AbortController().signal },
+          {
+            requests: 0,
+            async evaluate(request, policy) {
+              await policy?.beforeAttempt?.();
+              const state = request.state as {
+                path?: string;
+                declarations?: unknown[];
+                selectedEvidence?: Array<{ path: string }>;
+              };
+              // Delay one file's first pass so it finishes selection after the other.
+              if (state.declarations && !state.selectedEvidence && state.path === slow)
+                await new Promise((resolve) => setTimeout(resolve, 50));
+              if (state.selectedEvidence)
+                orders.push([...new Set(state.selectedEvidence.map((entry) => entry.path))]);
+              return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9]));
+            },
+          },
+        );
+        return orders;
+      };
+      for (const slow of ["few.ts", "many.ts"]) {
+        const orders = await donorOrders(slow);
+        expect(orders.length).toBeGreaterThan(0);
+        // Fewer declaration groups first, as sequential selection used to finish them.
+        for (const order of orders) expect(order).toEqual(["few.ts", "many.ts"]);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);

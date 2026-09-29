@@ -47,13 +47,18 @@ comparison. Owner: [installed runner](../../../evals/implementation/swebench/ins
 
 ### Preserve order inside requests while comparing independent requests fairly
 
-**When:** reference harness and source-selection integration.
+**When:** reference harness and source-selection integration; donor order revised
+after measuring warm searches.
 
-Files A and B both produce selected source. If B finishes first, its source enters
-the next cross-file request first. A cached answer can change which file finishes
-first, so it can legitimately produce a differently ordered later request. Sorting
-that source by filename would introduce a different input to Jev, the relevance
-classifier, even if every source byte were retained.
+Files A and B both produce selected source, and both enter the next cross-file
+request. Files are selected concurrently and used to enter in completion order.
+Most files need a single declaration group, so that order depended on provider
+timing: with jittered provider latency, warm searches resent 26 to 36 follow-up
+requests in half to all of the runs. Donors are now ordered explicitly: fewer
+declaration groups first, as sequential selection would finish them, then path.
+A warm search with unchanged selections therefore rebuilds the same follow-up
+requests. Sorting by filename alone would give Jev, the relevance classifier, a
+different input from the measured strategy, even if every source byte were retained.
 
 Navigation has the same property one level up. A directory level can span several
 concurrent navigation requests, and its decisions determine the next level's
@@ -75,9 +80,10 @@ preserve every request's internal array and question order
 
 **Gap:** the spec did not prescribe how to control concurrent reference calls in a
 fixture. **Reach:** fixture equality is not a promise of identical arrival or
-completion order in a live repository. Production retains completion order for
-cross-file evidence. **Verdict:** sound because it avoids hiding a semantic input
-change. **Confidence:** medium. Owners: [retrieval](../../../packages/core/src/retrieve.ts)
+completion order in a live repository. Where sequential selection would have
+finished files out of group-count order, such as ties or slow parsing, production
+requests differ from that order but stay repeatable. **Verdict:** sound because it
+avoids hiding a semantic input change. **Confidence:** medium. Owners: [retrieval](../../../packages/core/src/retrieve.ts)
 and [reference tests](https://github.com/dzhng/jevgrep/blob/80a216bfa0bf04b2ec615ede81f7af32f1c14153/test/reference/).
 
 ### Use one child process for the bundled Python interpreter
