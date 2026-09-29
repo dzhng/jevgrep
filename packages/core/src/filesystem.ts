@@ -67,6 +67,8 @@ export const filesystemDefaults = Object.freeze({
   maxOpenDirectories: 64,
   maxFileBytes: 16 * 1024 * 1024,
   maxIgnoreBytes: 1024 * 1024,
+  /** Source bytes of earlier snapshots retained for identity-checked reuse. */
+  maxReusableBytes: 32 * 1024 * 1024,
 });
 export type FilesystemOptions = {
   root: string;
@@ -76,11 +78,17 @@ export type FilesystemOptions = {
   limits?: Partial<
     Pick<
       typeof filesystemDefaults,
-      "pageSize" | "maxOpenDirectories" | "maxFileBytes" | "maxIgnoreBytes"
+      "pageSize" | "maxOpenDirectories" | "maxFileBytes" | "maxIgnoreBytes" | "maxReusableBytes"
     >
   >;
   signal?: AbortSignal;
+  /** Wall-clock milliseconds, compared with file timestamps; injectable for tests. */
+  now?: () => number;
 };
+/** Timestamps are coarse on some filesystems (two seconds on FAT). A write in the same tick as a
+ * read can leave a file's identity unchanged, so only a file whose last change is older than this
+ * margin at the start of its read can later be recognized by identity alone. */
+const recentChangeNs = 3_000_000_000n;
 
 type Scope = { directory: string; git?: Ignore; search?: Ignore };
 type Eligible = {
@@ -137,10 +145,12 @@ export async function createFilesystem(options: FilesystemOptions) {
     "maxOpenDirectories",
     "maxFileBytes",
     "maxIgnoreBytes",
+    "maxReusableBytes",
   ] as const) {
     if (!Number.isSafeInteger(limits[name]) || limits[name] < 1)
       throw new Error(`Invalid filesystem limit: ${name}`);
   }
+  const now = options.now ?? (() => Date.now());
   const protectedPaths = await Promise.all(
     [
       join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "jevgrep"),
@@ -361,10 +371,70 @@ export async function createFilesystem(options: FilesystemOptions) {
     if (result.status !== "eligible") return result;
     return result.stat.isFile() ? { status: "file" as const } : excluded("not_file");
   }
-  async function readSnapshot(path: string): Promise<SnapshotResult> {
+  type Reusable = { snapshot: Snapshot; stat: BigIntStats; bytes: number };
+  // Trusted earlier reads, least recently used first; bounded by source bytes.
+  const reusable = new Map<string, Reusable>();
+  let reusableBytes = 0;
+  function forget(path: string) {
+    const entry = reusable.get(path);
+    if (!entry) return;
+    reusable.delete(path);
+    reusableBytes -= entry.bytes;
+  }
+  function retain(path: string, entry: Reusable) {
+    forget(path);
+    if (entry.bytes > limits.maxReusableBytes) return;
+    reusable.set(path, entry);
+    reusableBytes += entry.bytes;
+    for (const [oldest, value] of reusable) {
+      if (reusableBytes <= limits.maxReusableBytes) break;
+      reusable.delete(oldest);
+      reusableBytes -= value.bytes;
+    }
+  }
+  /** Compares identity without reading bytes. Opening, unlike lstat alone, revalidates attributes
+   * that network filesystems cache between clients. */
+  async function sameFile(identity: Eligible, known: BigIntStats) {
+    if (!same(known, identity.stat) || stopped(identity.path) !== undefined) return false;
+    let handle;
+    try {
+      handle = await open(
+        identity.absolute,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      const current = await handle.stat({ bigint: true });
+      return current.isFile() && same(known, current);
+    } catch {
+      return false;
+    } finally {
+      await handle?.close();
+    }
+  }
+  /** Eligibility is evaluated on every call. With `reuse`, a file whose identity (device, inode,
+   * size, modification and change times) matches a trusted earlier read returns that snapshot
+   * instead of being reread and rehashed; any other file is read again. */
+  async function readSnapshot(
+    path: string,
+    options: { reuse?: boolean } = {},
+  ): Promise<SnapshotResult> {
+    const started = BigInt(Math.floor(now())) * 1_000_000n;
     const admitted = await eligibility(path);
-    if (admitted.status !== "eligible") return admitted;
-    if (!admitted.stat.isFile()) return excluded("not_file");
+    if (admitted.status !== "eligible") {
+      const named = pathName(path);
+      if (named) forget(named.path);
+      return admitted;
+    }
+    if (!admitted.stat.isFile()) {
+      forget(admitted.path);
+      return excluded("not_file");
+    }
+    const known = reusable.get(admitted.path);
+    if (options.reuse && known && (await sameFile(admitted, known.stat))) {
+      reusable.delete(admitted.path);
+      reusable.set(admitted.path, known);
+      return { status: "ok", snapshot: known.snapshot };
+    }
+    forget(admitted.path);
     const read = await readBytes(admitted, limits.maxFileBytes);
     if (read.status !== "ok") return read;
     const current = await eligibility(path);
@@ -380,14 +450,15 @@ export async function createFilesystem(options: FilesystemOptions) {
     }
     if (!policy.includeSensitive && /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/.test(source))
       return excluded("private_key");
-    return {
-      status: "ok",
-      snapshot: Object.freeze({
-        path: admitted.path,
-        source,
-        contentHash: createHash("sha256").update(read.bytes).digest("hex"),
-      }),
-    };
+    const snapshot = Object.freeze({
+      path: admitted.path,
+      source,
+      contentHash: createHash("sha256").update(read.bytes).digest("hex"),
+    });
+    const { mtimeNs, ctimeNs } = admitted.stat;
+    if ((mtimeNs > ctimeNs ? mtimeNs : ctimeNs) + recentChangeNs < started)
+      retain(admitted.path, { snapshot, stat: admitted.stat, bytes: read.bytes.length });
+    return { status: "ok", snapshot };
   }
   async function discard(token: string) {
     const cursor = cursors.get(token);
@@ -484,6 +555,8 @@ export async function createFilesystem(options: FilesystemOptions) {
   async function close() {
     closed = true;
     ruleCache.clear();
+    reusable.clear();
+    reusableBytes = 0;
     await Promise.all([...cursors.keys()].map(discard));
   }
   return { root, readSnapshot, lookupFile, listPage, closeCursor: discard, close };

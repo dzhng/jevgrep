@@ -68,7 +68,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     if (["authentication", "request-limit", "cancelled", "interrupted"].includes(kind)) stop = true;
   }
   async function snapshot(path: string) {
-    const result = await reader.readSnapshot(path);
+    const result = await reader.readSnapshot(path, { reuse: true });
     if (result.status === "issue") {
       issue(result.issue.kind);
       return;
@@ -426,7 +426,8 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     );
   }
   async function unchanged(candidate: { path: string; contentHash: string }) {
-    const result = await reader.readSnapshot(candidate.path);
+    // Unchanged file identity reuses the reader's earlier snapshot; any change rereads and rehashes.
+    const result = await reader.readSnapshot(candidate.path, { reuse: true });
     if (result.status === "ok" && result.snapshot.contentHash === candidate.contentHash) {
       inspected.add(candidate.path);
       return result.snapshot;

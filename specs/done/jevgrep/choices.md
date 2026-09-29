@@ -7,8 +7,9 @@ The [implementation record](README.md) owns the closure decision and the
 [corrected confirmation](assets/freshness-confirmation.md) owns measured outcomes.
 
 Review these medium-confidence choices first: the benchmark work clock, ordering
-inside cross-file evidence, and the shared Python interpreter. They preserve the
-intended behavior but create boundaries that future changes must respect.
+inside cross-file evidence, the shared Python interpreter and identity-based
+snapshot reuse. They preserve the intended behavior but create boundaries that
+future changes must respect.
 
 ## Sound — medium confidence
 
@@ -179,6 +180,31 @@ and the write that triggers a sweep pays for one metadata pass. **Verdict:** sou
 as a bounded-storage owner without per-write scans. **Confidence:** medium.
 Owner: [cache](../../../packages/core/src/cache.ts).
 
+### Reuse a snapshot while its file identity is unchanged
+
+**When:** performance review after overlapping declaration groups.
+
+Retrieval checks the same files many times: before each declaration group, before
+each provider attempt and for every cross-file donor. Each check used to reread
+and rehash the whole file; a 58-file search performed 985 full reads, and the
+serialized validation queue delayed requests behind them. The reader now keeps
+its earlier snapshot while the file's identity matches: device, inode, size and
+both modification and change times, confirmed by opening the file without
+reading it. Eligibility is still evaluated on every check, so ignore edits and
+exclusions apply immediately. A file whose last change is less than three seconds
+older than its read is never reused, because a second write in the same coarse
+timestamp tick could leave its identity unchanged. Retained source is bounded to
+32 MiB, least recently used first.
+
+**Gap:** freshness requires detecting changes between validations, not a specific
+detection mechanism. **Reach:** identity cannot see a write that leaves size and
+both timestamps unchanged, such as a delayed timestamp update through a shared
+memory map, a backward clock step, or a network server whose clock lags the client
+by more than the guard. Callers that omit `reuse` still reread every time.
+**Verdict:** sound for ordinary edits, saves, replacements and deletions.
+**Confidence:** medium. Owners: [reader](../../../packages/core/src/filesystem.ts)
+and [retrieval](../../../packages/core/src/retrieve.ts).
+
 ## Sound — high confidence
 
 ### Revalidate buffered source through the same filesystem policy
@@ -190,10 +216,11 @@ A request is queued with source from A and B. While it waits, the user edits A o
 adds an ignore rule excluding it. The request retains A's original content hash,
 a fingerprint of the bytes it used, outside the data sent to Jev. Before evaluating
 the buffered request, and before each provider attempt after any waiting, the
-same reader checks eligibility and compares current bytes with that hash. A
-changed source cannot knowingly be submitted again. If a navigation group has
-both invalid and healthy members, finite splitting lets the healthy siblings
-continue instead of discarding the entire group.
+same reader checks eligibility and confirms that the current snapshot still has
+that hash. A file whose identity shows no change keeps its earlier snapshot; any
+other file is reread. A changed source cannot knowingly be submitted again. If a
+navigation group has both invalid and healthy members, finite splitting lets the
+healthy siblings continue instead of discarding the entire group.
 
 The same rule applies when one file supplies context for another. Each distinct
 source donor is checked; stale excerpts are removed and the result becomes

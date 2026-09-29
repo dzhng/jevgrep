@@ -1,7 +1,7 @@
 import { renderResult } from "../apps/cli/src/render";
 import { routeProviderFetch } from "./fixtures/provider-route.mjs";
-import { expect } from "bun:test";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { expect, spyOn } from "bun:test";
+import { mkdtemp, mkdir, open, writeFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testIfDocker } from "./helpers/docker";
@@ -581,6 +581,76 @@ testIfDocker(
     }
   },
   120_000,
+);
+
+testIfDocker(
+  "retrieval reads an unchanged file once and still invalidates an edited candidate",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-reuse-"));
+    const realNow = Date.now;
+    // Fixture files must look older than the reader's recent-change guard.
+    const clock = spyOn(Date, "now").mockImplementation(() => realNow() + 10_000);
+    const source =
+      "// REUSE_SENTINEL\n" +
+      Array.from({ length: 20 }, (_, i) => `export function event${i}() {return ${i};}\n`).join("");
+    const events = join(root, "events.ts");
+    let reads = 0;
+    let restoreRead = () => {};
+    try {
+      await writeFile(events, source);
+      await writeFile(join(root, "other.ts"), "export function otherEvent() {return true;}\n");
+      // Two writes can share a coarse clock tick; pin the first mtime so the edit is observable.
+      await utimes(events, 0, 0);
+      const probe = await open(events);
+      const prototype = Object.getPrototypeOf(probe);
+      const originalRead = prototype.read;
+      await probe.close();
+      const spy = spyOn(prototype, "read").mockImplementation(async function (
+        this: unknown,
+        ...args: unknown[]
+      ) {
+        const result = await originalRead.apply(this, args);
+        if (result.buffer.subarray(0, result.bytesRead).toString().includes("REUSE_SENTINEL"))
+          reads++;
+        return result;
+      });
+      restoreRead = () => spy.mockRestore();
+      const search = (edit: boolean) => {
+        let edited = false;
+        return retrieve(
+          { root, query: "event behavior", signal: new AbortController().signal },
+          {
+            requests: 0,
+            async evaluate(request, policy) {
+              await policy?.beforeAttempt?.();
+              const state = request.state as { declarations?: unknown[]; path?: string };
+              if (edit && !edited && state.declarations && state.path === "events.ts") {
+                edited = true;
+                await writeFile(events, source.replace("return 0;", "return 9;"));
+              }
+              return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9]));
+            },
+          },
+        );
+      };
+      const healthy = await search(false);
+      expect(healthy.status).toBe("complete");
+      expect(healthy.files.find((file) => file.path === "events.ts")?.excerpts.length).toBe(1);
+      // Discovery, both selection passes, every freshness check and final output share one read.
+      expect(reads).toBe(1);
+      const changed = await search(true);
+      expect(changed.status).toBe("incomplete");
+      expect(changed.issues).toContainEqual({ kind: "changed", count: expect.any(Number) });
+      expect(changed.files.find((file) => file.path === "events.ts")).toMatchObject({
+        excerpts: [],
+        sourceOmitted: true,
+      });
+    } finally {
+      restoreRead();
+      clock.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
 );
 
 testIfDocker(

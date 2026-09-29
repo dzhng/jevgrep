@@ -80,9 +80,10 @@ source text is a field inside those objects. Provider selection changes transpor
 and authentication, not retrieval semantics. Bounded retries, cancellation and
 freshness checks apply before source is uploaded or returned.
 
-Ignore rules are reused within a search only while fresh filesystem identity and
-canonical-path checks still match. Edits, replacement and deletion invalidate
-that reuse. Source snapshots retain their existing read and freshness checks.
+Ignore rules and source snapshots are reused within a search only while fresh
+eligibility and filesystem identity checks still match. Edits, replacement and
+deletion invalidate that reuse. A file changed within a few seconds of its read is
+always read again, because coarse timestamps cannot separate two writes in one tick.
 
 ## Version improvement
 
