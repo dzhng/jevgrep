@@ -45,11 +45,16 @@ test("Python declaration, preview, neighborhood and inherited-call outputs match
                       ],
                     },
               );
-        assert.deepEqual(
-          await runParser(helper, input),
-          reference(helper, input),
-          `${helper}: ${base}`,
-        );
+        const actual = await runParser(helper, input);
+        // The frozen helper predates the class-context marker; parity covers boundaries and names.
+        const comparable =
+          helper === "inspect" && Array.isArray(actual)
+            ? actual.map(({ classContext, ...unit }: { classContext?: boolean; name: string }) => {
+                if (classContext) assert.ok(unit.name.endsWith(".context"), unit.name);
+                return unit;
+              })
+            : actual;
+        assert.deepEqual(comparable, reference(helper, input), `${helper}: ${base}`);
       }
     }
 });

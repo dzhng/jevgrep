@@ -701,3 +701,42 @@ testIfDocker(
     }
   },
 );
+
+for (const [layout, source, expected] of [
+  ["class header", "export class Widget {\n  context() { return 1; }\n}\n", 1],
+  ["member named context only", "export class Widget { context() { return 1; } }\n", 0],
+] as const)
+  testIfDocker(`relationship anchoring follows class structure: ${layout}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-anchor-"));
+    let relationships = 0;
+    try {
+      await mkdir(join(root, "pkg/sub"), { recursive: true });
+      await writeFile(join(root, "widget.ts"), source);
+      await writeFile(
+        join(root, "pkg/sub/child.ts"),
+        "export class Child extends Widget { context() { return 2; } }\n",
+      );
+      await retrieve(
+        { root, query: "widget context", signal: new AbortController().signal },
+        {
+          requests: 0,
+          async evaluate(request) {
+            const state = request.state as {
+              relationAnchor?: unknown;
+              items?: Array<{ kind: string }>;
+            };
+            if (state.relationAnchor) relationships++;
+            return Object.fromEntries(
+              Object.keys(request.questions).map((id, index) => [
+                id,
+                state.items ? (state.items[index]?.kind === "file" ? 0.9 : 0.1) : 0.9,
+              ]),
+            );
+          },
+        },
+      );
+      expect(relationships).toBe(expected);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });

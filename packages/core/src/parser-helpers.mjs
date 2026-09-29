@@ -174,6 +174,7 @@ function inspectPython(root) {
               startLine: cursor,
               endLine: start - 1,
               ownerHeaders: own,
+              classContext: true,
             });
           visit([child], named + ".", own);
           cursor = endLine(child) + 1;
@@ -184,6 +185,7 @@ function inspectPython(root) {
             startLine: cursor,
             endLine: r.endLine,
             ownerHeaders: own,
+            classContext: true,
           });
       } else units.push({ name: named, ...r, ownerHeaders: headers });
     }

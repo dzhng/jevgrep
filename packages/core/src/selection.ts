@@ -128,6 +128,7 @@ export async function selectFile(
           sourceByteStart: offsets[start - 1]!,
           sourceByteEnd: offsets[end]!,
           partial: true,
+          ...(unit.classContext ? { classContext: true as const } : {}),
         });
       }
       return blocks;
@@ -302,7 +303,7 @@ export async function selectFile(
             contextSpans.push(span);
             if (!partialLine(unit)) selectedCoordinates.push(unit.range);
           }
-          if (value > 0.25 && !unit.name.endsWith(".context"))
+          if (value > 0.25 && !unit.classContext)
             addLead({
               name: unit.name,
               range: partialLine(unit)

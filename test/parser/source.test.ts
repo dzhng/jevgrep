@@ -372,3 +372,42 @@ test("Python nested beyond the query depth falls back quickly while wide files p
   assert.equal(parsed.mode, "python");
   assert.equal(parsed.units[0]?.name, "f");
 });
+
+test("class context is marked structurally, not inferred from member names", async () => {
+  const marked = async (path: string, source: string) =>
+    (await inspect({ path, source, contentHash: "fixture" })).units.map(
+      ({ name, range, classContext }) =>
+        `${name}@${range.startLine}-${range.endLine}${classContext ? " [class context]" : ""}`,
+    );
+  assert.deepEqual(
+    await marked(
+      "template.py",
+      'class Template:\n    """Render with a context."""\n    engine = None\n\n    def context(self, request):\n        return {"request": request}\n\n    def render(self, request):\n        return self.context(request)\n',
+    ),
+    [
+      "Template.context@1-4 [class context]",
+      "Template.context@5-6",
+      "Template.context@7-7 [class context]",
+      "Template.render@8-9",
+    ],
+  );
+  assert.deepEqual(
+    await marked(
+      "widget.ts",
+      'export class Widget {\n  static kind = "w";\n  context() {\n    return {};\n  }\n}\nexport class Inline { context() { return 1; } }\n',
+    ),
+    [
+      "Widget.context@1-1 [class context]",
+      "Widget.kind@2-2",
+      "Widget.context@3-5",
+      "Inline.context@7-7",
+    ],
+  );
+  assert.deepEqual(
+    await marked(
+      "widget.rs",
+      "struct Widget;\nimpl Widget {\n    fn context(&self) -> u32 {\n        1\n    }\n}\n",
+    ),
+    ["Widget@1-1", "Widget.context@2-2 [class context]", "Widget.context@3-5"],
+  );
+});

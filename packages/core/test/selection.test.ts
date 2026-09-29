@@ -369,3 +369,48 @@ test("a failure or invalidation observed during preparation stops later dispatch
   expect(invalidated.file.selected).toEqual([]);
   expect(invalidated.file.leads).toEqual([]);
 });
+
+test("a real member named context remains a reading lead", async () => {
+  const located = async (path: string, source: string) =>
+    (
+      await selectFile(
+        { path, contentHash: path, source },
+        "render context",
+        0.9,
+        evaluator(() => 0.9),
+      )
+    ).file.leads.map((lead) => `${lead.name}@${lead.range.startLine}-${lead.range.endLine}`);
+  expect(
+    await located(
+      "template.py",
+      'class Template:\n    """Render with a context."""\n    engine = None\n\n    def context(self, request):\n        return {"request": request}\n\n    def render(self, request):\n        return self.context(request)\n',
+    ),
+  ).toEqual(["Template.context@5-6", "Template.render@8-9"]);
+  expect(
+    await located(
+      "widget.ts",
+      'export class Widget {\n  static kind = "w";\n  context(): Record<string, unknown> {\n    return {};\n  }\n  render() {\n    return this.context();\n  }\n}\n',
+    ),
+  ).toEqual(["Widget.kind@2-2", "Widget.context@3-5", "Widget.render@6-8"]);
+  expect(
+    await located(
+      "widget.rs",
+      "struct Widget;\nimpl Widget {\n    fn context(&self) -> u32 {\n        1\n    }\n    fn render(&self) -> u32 {\n        self.context()\n    }\n}\n",
+    ),
+  ).toEqual(["Widget@1-1", "Widget.context@3-5", "Widget.render@6-8"]);
+});
+
+test("oversized class context split into blocks stays out of leads", async () => {
+  const source =
+    "export class Big {\n" +
+    `  // ${"x".repeat(70)}\n`.repeat(400) +
+    "  method() {\n    return 1;\n  }\n}\n";
+  const result = await selectFile(
+    { path: "big.ts", contentHash: "big", source },
+    "q",
+    0.9,
+    evaluator(() => 0.9),
+  );
+  expect(result.file.selected.length).toBeGreaterThan(0);
+  expect(result.file.leads.map((lead) => lead.name)).toEqual(["Big.method"]);
+});

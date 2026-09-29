@@ -486,9 +486,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
         ).units;
         const classes = [
           ...new Set(
-            units
-              .filter((unit) => unit.name.endsWith(".context"))
-              .map((unit) => unit.name.split(".")[0]!),
+            units.filter((unit) => unit.classContext).map((unit) => unit.name.split(".")[0]!),
           ),
         ];
         if (classes.length && Buffer.byteLength(JSON.stringify(classes)) < 4000) {

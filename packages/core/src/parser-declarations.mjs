@@ -93,6 +93,7 @@ export function declarations(root, language) {
             name: prefix + owner + ".context",
             range: header,
             ownerHeaders: [...ownedHeaders, header],
+            classContext: true,
           });
           visit(
             body.namedChildren,
