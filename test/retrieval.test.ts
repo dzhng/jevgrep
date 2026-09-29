@@ -384,21 +384,23 @@ testIfDocker(
   "file priority reaches stdout without changing relevance or excluding background documents",
   async () => {
     const root = await mkdtemp(join(tmpdir(), "jg-priority-"));
-    const roles: Array<{ query: string; path: string; preview: { text: string } }> = [];
+    const roles: Array<{ path: string; preview: { text: string } }> = [];
     const server = Bun.serve({
       port: 0,
       async fetch(request) {
         const body = (await request.json()) as {
           state: {
             query: string;
-            path: string;
-            preview?: { text: string };
+            files?: Array<{ path: string; preview: { text: string } }>;
             items?: Array<{ path: string }>;
           };
           questions: Record<string, unknown>;
         };
-        if (body.state.preview) roles.push(body.state as (typeof roles)[number]);
+        if (body.state.files) roles.push(...body.state.files);
         const design = body.state.query.includes("design");
+        // Assessment questions are numbered per file: f<index>_<role>.
+        const asked = (id: string) => id.replace(/^f(\d+)_/, "");
+        const file = (id: string) => body.state.files?.[Number(/^f(\d+)_/.exec(id)?.[1] ?? 0)];
         return Response.json({
           answers: Object.fromEntries(
             Object.keys(body.questions).map((id, index) => [
@@ -406,8 +408,8 @@ testIfDocker(
               {
                 type: "noul",
                 noul:
-                  id === "priority"
-                    ? body.state.path.startsWith("specs/") === design
+                  asked(id) === "priority"
+                    ? file(id)!.path.startsWith("specs/") === design
                       ? 0.95
                       : 0.1
                     : body.state.items
@@ -538,4 +540,223 @@ testIfDocker(
       await rm(root, { recursive: true, force: true });
     }
   },
+);
+
+type Assessed = { state: { files?: Array<{ path: string }> }; questions: Record<string, unknown> };
+
+/** Builds a repository where every file is admitted and roles follow the file name. */
+async function admittedRepository(count: number) {
+  const root = await mkdtemp(join(tmpdir(), "jg-assess-"));
+  for (let i = 0; i < count; i++)
+    await writeFile(
+      join(root, `mod${String(i).padStart(3, "0")}.ts`),
+      `export function record${i}(name: string) { return name; }\n`,
+    );
+  return root;
+}
+
+testIfDocker(
+  "file assessment classifies many files per request and keeps each file's own roles",
+  async () => {
+    const root = await admittedRepository(24);
+    const assessments: Assessed[] = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as {
+          state: { items?: unknown[]; files?: Array<{ path: string }> };
+          questions: Record<string, unknown>;
+        };
+        const files = body.state.files;
+        if (files) assessments.push(body as Assessed);
+        return Response.json({
+          answers: Object.fromEntries(
+            Object.keys(body.questions).map((id) => {
+              // Navigation admits every file; only assessment questions are per file.
+              if (!files) return [id, { type: "noul", noul: 0.9 }];
+              const index = Number(/^f(\d+)_/.exec(id)?.[1]);
+              const role = id.replace(/^f\d+_/, "");
+              // Even-numbered modules implement the behavior; odd ones only test it.
+              const named = index % 2 === 0 ? role === "implementation" : role === "test";
+              return [
+                id,
+                {
+                  type: "noul",
+                  noul: role === "priority" ? (index % 2 === 0 ? 0.9 : 0.2) : named ? 0.9 : 0.1,
+                },
+              ];
+            }),
+          ),
+          ...(files ? { usage: { input_tokens: 500, output_tokens: 1 } } : {}),
+        });
+      },
+    });
+    try {
+      const signal = new AbortController().signal;
+      const result = await retrieve(
+        { root, query: "record a name", signal },
+        createEvaluator({
+          apiKey: "fixture",
+          provider: "vercel",
+          fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+          signal,
+        }),
+      );
+      expect(result.status).toBe("complete");
+      // 24 files are classified in far fewer round trips than one request per file.
+      expect(assessments.length).toBeGreaterThan(0);
+      expect(assessments.length).toBeLessThan(24);
+      expect(
+        new Set(assessments.flatMap((body) => body.state.files!.map((f) => f.path))).size,
+      ).toBe(24);
+      // Roles and priority are answered per file, not shared across the batch.
+      for (const file of result.files) {
+        const index = Number(/mod(\d+)\.ts$/.exec(file.path)![1]);
+        expect(file.roles).toEqual(index % 2 === 0 ? ["implementation"] : ["test"]);
+        expect(file.priority).toBe(index % 2 === 0 ? 0.9 : 0.2);
+      }
+      expect(result.counts.inputTokens).toBe(assessments.length * 500);
+    } finally {
+      server.stop(true);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+testIfDocker(
+  "a request budget stops the search and still returns the evidence gathered so far",
+  async () => {
+    const root = await admittedRepository(24);
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as { questions: Record<string, unknown> };
+        return Response.json({
+          answers: Object.fromEntries(
+            Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.9 }]),
+          ),
+          usage: { input_tokens: 1_000, output_tokens: 1 },
+        });
+      },
+    });
+    try {
+      const signal = new AbortController().signal;
+      const result = await retrieve(
+        { root, query: "record a name", signal },
+        createEvaluator({
+          apiKey: "fixture",
+          provider: "vercel",
+          requestLimit: 4,
+          fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+          signal,
+        }),
+      );
+      expect(result.status).toBe("incomplete");
+      // The issue count is how many attempts the ceiling refused, not a single event.
+      expect(result.issues.some((issue) => issue.kind === "request-limit")).toBe(true);
+      expect(result.counts.requests).toBe(4);
+      // Partial results are the point of the budget: admitted files still carry source.
+      expect(result.files.length).toBeGreaterThan(0);
+      expect(result.files.some((file) => file.excerpts.length > 0)).toBe(true);
+    } finally {
+      server.stop(true);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+testIfDocker(
+  "a token budget stops the search and reports the tokens already spent",
+  async () => {
+    const root = await admittedRepository(24);
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as { questions: Record<string, unknown> };
+        return Response.json({
+          answers: Object.fromEntries(
+            Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.9 }]),
+          ),
+          usage: { input_tokens: 1_000, output_tokens: 1 },
+        });
+      },
+    });
+    try {
+      const signal = new AbortController().signal;
+      const result = await retrieve(
+        { root, query: "record a name", signal },
+        createEvaluator({
+          apiKey: "fixture",
+          provider: "vercel",
+          tokenLimit: 2_500,
+          fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+          signal,
+        }),
+      );
+      expect(result.status).toBe("incomplete");
+      expect(result.issues.some((issue) => issue.kind === "token-limit")).toBe(true);
+      expect(result.counts.inputTokens).toBeGreaterThanOrEqual(2_500);
+      expect(result.files.length).toBeGreaterThan(0);
+    } finally {
+      server.stop(true);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+testIfDocker(
+  "a file changed during assessment is isolated and its neighbours are still classified",
+  async () => {
+    const root = await admittedRepository(8);
+    let mutated = false;
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as {
+          state: { items?: unknown[]; files?: Array<{ path: string }> };
+          questions: Record<string, unknown>;
+        };
+        const files = body.state.files;
+        if (files && !mutated) {
+          mutated = true;
+          await writeFile(
+            join(root, "mod003.ts"),
+            "export function replaced(name: string) { return name; }\n",
+          );
+        }
+        return Response.json({
+          answers: Object.fromEntries(
+            Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.9 }]),
+          ),
+        });
+      },
+    });
+    try {
+      const signal = new AbortController().signal;
+      const result = await retrieve(
+        { root, query: "record a name", signal },
+        createEvaluator({
+          apiKey: "fixture",
+          provider: "vercel",
+          fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+          signal,
+        }),
+      );
+      expect(mutated).toBe(true);
+      expect(result.status).toBe("incomplete");
+      expect(result.issues.some((issue) => issue.kind === "changed")).toBe(true);
+      const roles = new Map(result.files.map((file) => [file.path, file.roles]));
+      // The stale file is never classified, but the rest of its batch still is.
+      expect(roles.get("mod003.ts")).toEqual([]);
+      expect(roles.get("mod000.ts")).toContain("implementation");
+      expect(roles.get("mod007.ts")).toContain("implementation");
+    } finally {
+      server.stop(true);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
 );

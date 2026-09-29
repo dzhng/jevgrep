@@ -18,6 +18,25 @@ import type { Evaluator, FileEvidence, RetrievalResult, SearchInput } from "./ty
 
 // Bound per-stage source work; the evaluator separately caps shared provider attempts.
 const stageWorkers = 32;
+/** A single request may carry this much navigation or assessment state. */
+const maxRequestBytes = 38_000;
+/** Opening previews are what discovery uploads, so a search spends a bounded text budget
+ * across the eligible tree. Repositories that fit the budget keep the current allowance. */
+const previewTextBudgetBytes = 4 * 1_048_576;
+const maxPreviewTextBytes = 16_384;
+const minPreviewTextBytes = 2_048;
+const maxPreviewBytes = 32_000;
+const minPreviewBytes = 4_096;
+
+/** The opening allowance for a repository this size. A large repository spreads its files
+ * over many directories, so per-directory fan-out does not predict the upload total. */
+function previewAllowance(eligibleFiles: number) {
+  if (eligibleFiles < 1) return maxPreviewTextBytes;
+  return Math.min(
+    maxPreviewTextBytes,
+    Math.max(minPreviewTextBytes, Math.floor(previewTextBudgetBytes / eligibleFiles)),
+  );
+}
 /** Traversal owns admission; every stage reads through the same eligibility policy. */
 export async function retrieve(input: SearchInput, evaluator: Evaluator): Promise<RetrievalResult> {
   const reader = await createFilesystem({
@@ -61,10 +80,42 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
   }
   let entriesSeen = 0;
   let stop = false;
+  let previewTextBytes = maxPreviewTextBytes;
+  /** Counts eligible files by listing directories only. It sizes the opening allowance
+   * before any source is uploaded; a cancelled or bounded count keeps the full allowance. */
+  async function eligibleFiles() {
+    const queue = ["."];
+    const seen = new Set<string>();
+    let files = 0;
+    let entries = 0;
+    while (queue.length && !input.signal.aborted && entries < 100_000) {
+      const path = queue.shift()!;
+      if (seen.has(path)) continue;
+      seen.add(path);
+      let cursor: string | undefined;
+      try {
+        do {
+          const page = await reader.listPage(path, cursor);
+          cursor = page.nextCursor;
+          for (const entry of page.entries) {
+            if (entries++ >= 100_000) return files;
+            if (entry.kind === "directory") queue.push(entry.path);
+            else files++;
+          }
+        } while (cursor && !input.signal.aborted);
+      } finally {
+        if (cursor) await reader.closeCursor(cursor);
+      }
+    }
+    return files;
+  }
   function issue(kind: string, count = 1, message?: string) {
     if (kind === "provider") providerFailure ??= message;
     issues.set(kind, (issues.get(kind) ?? 0) + count);
-    if (["authentication", "request-limit", "cancelled", "interrupted"].includes(kind)) stop = true;
+    if (
+      ["authentication", "request-limit", "token-limit", "cancelled", "interrupted"].includes(kind)
+    )
+      stop = true;
   }
   async function snapshot(path: string) {
     const result = await reader.readSnapshot(path);
@@ -76,13 +127,41 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     inspected.add(path);
     return result.snapshot;
   }
+  /** Runs bounded request groups on the shared stage pool. A rejected group aborts the stage. */
+  async function pooled<T>(take: () => T | undefined, run: (group: T) => Promise<void>) {
+    await new Promise<void>((resolve, reject) => {
+      let active = 0;
+      let rejected = false;
+      function pump() {
+        if (rejected) return;
+        while (active < stageWorkers) {
+          const group = take();
+          if (group === undefined) break;
+          active++;
+          run(group).then(
+            () => {
+              active--;
+              pump();
+            },
+            (error) => {
+              rejected = true;
+              reject(error);
+            },
+          );
+        }
+        if (active === 0) resolve();
+      }
+      pump();
+    });
+  }
   async function score(items: NavigationItem[], anchor?: { path: string; classes: string[] }) {
     const results: Array<{ item: NavigationItem; score: number }> = [];
     const batches: NavigationItem[][] = [];
     let batch: NavigationItem[] = [];
     for (const item of items) {
       if (
-        Buffer.byteLength(JSON.stringify(navigationRequest(input.query, [item], anchor))) > 38_000
+        Buffer.byteLength(JSON.stringify(navigationRequest(input.query, [item], anchor))) >
+        maxRequestBytes
       ) {
         issue("request-size");
         continue;
@@ -92,7 +171,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
         (batch.length >= 128 ||
           Buffer.byteLength(
             JSON.stringify(navigationRequest(input.query, [...batch, item], anchor)),
-          ) > 38_000)
+          ) > maxRequestBytes)
       ) {
         batches.push(batch);
         batch = [];
@@ -128,29 +207,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     }
     // Failed groups append their halves to the same queue. A recovered parent is
     // not incomplete; only an exhausted leaf or a terminal failure records an issue.
-    await new Promise<void>((resolve, reject) => {
-      let active = 0;
-      let rejected = false;
-      function pump() {
-        if (rejected) return;
-        while (active < stageWorkers && batches.length && !stop && !input.signal.aborted) {
-          const group = batches.shift()!;
-          active++;
-          scoreGroup(group).then(
-            () => {
-              active--;
-              pump();
-            },
-            (error) => {
-              rejected = true;
-              reject(error);
-            },
-          );
-        }
-        if (active === 0) resolve();
-      }
-      pump();
-    });
+    await pooled(() => (stop || input.signal.aborted ? undefined : batches.shift()), scoreGroup);
     return results;
   }
   async function previewDirectory(path: string): Promise<DirectoryPreview | undefined> {
@@ -239,12 +296,12 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     }
     return buffered({ ...item, childPreview: preview }, sources);
   }
-  async function previewFile(source: Snapshot): Promise<FilePreview> {
+  async function previewFile(source: Snapshot, textBudget: number): Promise<FilePreview> {
     const bytes = Buffer.from(source.source);
-    let text = new TextDecoder("utf8", { fatal: true }).decode(bytes.subarray(0, 16384), {
-      stream: bytes.length > 16384,
+    let text = new TextDecoder("utf8", { fatal: true }).decode(bytes.subarray(0, textBudget), {
+      stream: bytes.length > textBudget,
     });
-    let truncated = bytes.length > 16384;
+    let truncated = bytes.length > textBudget;
     while (Buffer.byteLength(JSON.stringify(text)) > 24000) {
       let end = Math.floor(text.length * 0.75);
       const last = text.charCodeAt(end - 1);
@@ -262,12 +319,15 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       declarations: [],
       declarationIndexTruncated: false,
     };
+    // A short sample only stays competitive with a full preview when it also names the
+    // declarations behind the unseen bytes, so both allowances scale together.
+    const previewBytes = Math.min(maxPreviewBytes, Math.max(minPreviewBytes, textBudget * 2));
     if (truncated && /\.pyi?$/.test(source.path) && bytes.length <= 1_000_000) {
-      const sampled = await pythonPreview(source, input.query, 16384, input.signal);
+      const sampled = await pythonPreview(source, input.query, textBudget, input.signal);
       if (
         sampled?.truncated &&
         sampled.text &&
-        Buffer.byteLength(sampled.text) <= 16384 &&
+        Buffer.byteLength(sampled.text) <= textBudget &&
         Buffer.byteLength(JSON.stringify(sampled.text)) <= 24000
       ) {
         preview.text = sampled.text;
@@ -284,10 +344,14 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
         signal: input.signal,
         maxUnitBytes: Math.max(4, bytes.length),
       });
+      // Names screen a file far more cheaply than coordinates; selection recomputes ranges.
       preview.declarations = syntax.units
         .filter((unit) => !unit.partial)
-        .map((unit) => ({ name: unit.name, ...unit.range }));
-      while (preview.declarations.length && Buffer.byteLength(JSON.stringify(preview)) > 32000) {
+        .map((unit) => ({ name: unit.name }));
+      while (
+        preview.declarations.length &&
+        Buffer.byteLength(JSON.stringify(preview)) > previewBytes
+      ) {
         preview.declarations.pop();
         preview.declarationIndexTruncated = true;
       }
@@ -345,7 +409,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
             const source = await snapshot(entry.path);
             if (!source) continue;
             hashes.set(entry.path, source.contentHash);
-            const filePreview = await previewFile(source);
+            const filePreview = await previewFile(source, previewTextBytes);
             previews.set(entry.path, filePreview);
             if (Buffer.byteLength(source.source) > 1_000_000) {
               issue("resource_limit");
@@ -464,6 +528,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
   }
   try {
     try {
+      previewTextBytes = previewAllowance(await eligibleFiles());
       await discover(["."]);
       let anchor: { path: string; classes: string[] } | undefined;
       for (const candidate of sortedCandidates()) {
@@ -592,33 +657,86 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
             return fresh.length ? fresh : undefined;
           });
       };
-      // File assessment reads only the discovery preview, so it runs alongside evidence selection.
+      // File assessment reads only the discovery preview, so it runs alongside evidence
+      // selection. Previews are assessed several files per request; a failed group is
+      // split, so one unusable file still leaves its neighbours classified.
       const assessments = new Map<string, { labels: string[]; priority: number }>();
-      const assessFiles = () =>
-        parallel(ordered, async (candidate) => {
-          const source = await unchanged(candidate);
-          if (!source) return;
-          const preview = previews.get(candidate.path)!;
+      const assessFiles = async () => {
+        // Every assessed file must still match the snapshot its preview came from.
+        // Validation runs in parallel, but the assessed order stays the candidate order so
+        // the same repository always produces the same batches and cache identities.
+        const current = new Set<string>();
+        await parallel(
+          ordered.filter((candidate) => previews.get(candidate.path)),
+          async (candidate) => {
+            if (await unchanged(candidate)) current.add(candidate.path);
+          },
+        );
+        const assessable = ordered.filter((candidate) => current.has(candidate.path));
+        function assessmentInput(group: typeof ordered) {
+          return group.map((candidate) => ({
+            path: candidate.path,
+            preview: previews.get(candidate.path)!,
+          }));
+        }
+        const batches: (typeof assessable)[] = [];
+        let batch: typeof assessable = [];
+        for (const candidate of assessable) {
+          // Size on the whole request: criteria and questions share the same state limit.
+          if (
+            batch.length &&
+            (batch.length >= 16 ||
+              Buffer.byteLength(
+                JSON.stringify(
+                  fileAssessmentRequest(input.query, assessmentInput([...batch, candidate])),
+                ),
+              ) > maxRequestBytes)
+          ) {
+            batches.push(batch);
+            batch = [];
+          }
+          batch.push(candidate);
+        }
+        if (batch.length) batches.push(batch);
+        async function assessGroup(group: typeof ordered) {
           try {
             const scores = await freshEvaluation(
-              fileAssessmentRequest(input.query, candidate.path, preview),
-              [candidate],
+              fileAssessmentRequest(input.query, assessmentInput(group)),
+              group,
             );
-            assessments.set(candidate.path, {
-              labels: Object.keys(scores).filter(
-                (role) => role !== "priority" && scores[role]! > 0.5,
-              ),
-              priority: scores.priority!,
+            group.forEach((candidate, index) => {
+              const prefix = `f${index}_`;
+              assessments.set(candidate.path, {
+                labels: Object.keys(scores)
+                  .filter((id) => id.startsWith(prefix) && !id.endsWith("_priority"))
+                  .filter((id) => scores[id]! > 0.5)
+                  .map((id) => id.slice(prefix.length)),
+                priority: scores[`${prefix}priority`]!,
+              });
             });
           } catch (error) {
-            if (!(error instanceof EvaluationFailure && error.kind === "source-invalid"))
+            // Only a changed source is worth splitting: every attempt revalidates the
+            // group, so halving isolates the stale file and classifies its neighbours.
+            if (
+              error instanceof EvaluationFailure &&
+              error.kind === "source-invalid" &&
+              group.length > 1
+            ) {
+              const middle = Math.ceil(group.length / 2);
+              batches.push(group.slice(0, middle), group.slice(middle));
+            } else if (!(error instanceof EvaluationFailure && error.kind === "source-invalid"))
               issue(
                 error instanceof EvaluationFailure ? error.kind : "provider",
                 1,
                 error instanceof EvaluationFailure ? error.message : undefined,
               );
           }
-        });
+        }
+        await pooled(
+          () => (stop || input.signal.aborted ? undefined : batches.shift()),
+          assessGroup,
+        );
+      };
       await Promise.all([selectEvidence(), assessFiles()]);
       await parallel(ordered, async (candidate) => {
         const file = files.get(candidate.path);
@@ -734,6 +852,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
         requests: evaluator.requests,
         cacheHits: evaluator.cacheHits ?? 0,
         inspectedFiles: inspected.size,
+        ...(evaluator.inputTokens === undefined ? {} : { inputTokens: evaluator.inputTokens }),
       },
     };
   } finally {

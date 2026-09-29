@@ -44,7 +44,7 @@ export type RetrievalResult = {
     instructionFiles: string[];
     instructionLookupIncomplete: boolean;
   };
-  counts: { requests: number; cacheHits: number; inspectedFiles: number };
+  counts: { requests: number; cacheHits: number; inspectedFiles: number; inputTokens?: number };
 };
 export type SearchInput = {
   root: string;
@@ -57,6 +57,8 @@ export type Evaluator = {
   readonly requests: number;
   readonly cacheHits?: number;
   readonly cacheIssues?: Array<{ kind: string; count: number }>;
+  /** Provider-reported input tokens; absent when the evaluator cannot report usage. */
+  readonly inputTokens?: number;
   /** Validate sources before each transport attempt and before returning a cached answer. */
   evaluate(
     request: EvaluationRequest,

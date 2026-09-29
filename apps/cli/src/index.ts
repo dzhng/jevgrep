@@ -123,6 +123,8 @@ async function main() {
       const evaluator = createEvaluator({
         cache,
         concurrency: command.concurrency,
+        requestLimit: command.maxRequests,
+        tokenLimit: command.maxTokens,
         policyVersion: JSON.stringify(command.policy),
         ...credentials,
         signal: controller.signal,

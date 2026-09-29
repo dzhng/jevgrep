@@ -16,6 +16,7 @@ export class EvaluationFailure extends Error {
     public readonly kind:
       | "authentication"
       | "request-limit"
+      | "token-limit"
       | "provider"
       | "cancelled"
       | "source-invalid",
@@ -38,6 +39,7 @@ export function createEvaluator(options: {
   fetch?: typeof fetch;
   signal: AbortSignal;
   requestLimit?: number;
+  tokenLimit?: number;
   timeoutMs?: number;
   concurrency?: number;
 }) {
@@ -46,9 +48,27 @@ export function createEvaluator(options: {
   const timeoutMs = options.timeoutMs ?? (options.provider === "typesafe" ? 60_000 : 15_000);
   if (!Number.isSafeInteger(concurrency) || concurrency < 1)
     throw new Error("Concurrency must be a positive integer");
+  if (
+    options.requestLimit !== undefined &&
+    (!Number.isSafeInteger(options.requestLimit) || options.requestLimit < 1)
+  )
+    throw new Error("Request limit must be a positive integer");
+  if (
+    options.tokenLimit !== undefined &&
+    (!Number.isSafeInteger(options.tokenLimit) || options.tokenLimit < 1)
+  )
+    throw new Error("Token limit must be a positive integer");
   let requests = 0;
   let cacheHits = 0;
+  let inputTokens = 0;
   let cooldownUntil = 0;
+  // Budgets are checked before each attempt. Requests already in flight are counted
+  // when they land, so a limit is a ceiling that concurrent work can overshoot.
+  function assertBudget() {
+    if (requests >= (options.requestLimit ?? 50_000)) throw new EvaluationFailure("request-limit");
+    if (options.tokenLimit !== undefined && inputTokens >= options.tokenLimit)
+      throw new EvaluationFailure("token-limit");
+  }
   const rateBudget =
     options.provider === "typesafe"
       ? createRateBudget({ tokensPerSecond: 250_000, requestsPerMinute: 1_200 })
@@ -84,8 +104,7 @@ export function createEvaluator(options: {
     baseURL: endpoint.baseURL,
     fetch: async (input, init) => {
       assertActive();
-      if (requests >= (options.requestLimit ?? 50_000))
-        throw new EvaluationFailure("request-limit");
+      assertBudget();
       requests++;
       const response = await (options.fetch ?? fetch)(input, init);
       if (response.status === 429) {
@@ -112,6 +131,9 @@ export function createEvaluator(options: {
     },
     get requests() {
       return requests;
+    },
+    get inputTokens() {
+      return inputTokens;
     },
     async evaluate(
       request: EvaluationRequest,
@@ -150,8 +172,7 @@ export function createEvaluator(options: {
       let attemptLimit = navigation && multiple ? 1 : 2;
       for (let attempt = 0; attempt < attemptLimit; attempt++) {
         assertActive();
-        if (requests >= (options.requestLimit ?? 50_000))
-          throw new EvaluationFailure("request-limit");
+        assertBudget();
         const release = await acquire();
         try {
           assertActive();
@@ -190,6 +211,8 @@ export function createEvaluator(options: {
               ]),
             });
             reservation?.reconcile(result.usage.inputTokens);
+            if (Number.isSafeInteger(result.usage.inputTokens) && result.usage.inputTokens! >= 0)
+              inputTokens += result.usage.inputTokens!;
             const scores = Object.fromEntries(
               Object.keys(request.questions).map((id) => {
                 const answer = result.answers[id];
@@ -220,8 +243,8 @@ export function createEvaluator(options: {
                 providerDiagnostic(error, options.apiKey),
               );
             }
-            if (requests >= (options.requestLimit ?? 50_000))
-              throw new EvaluationFailure("request-limit");
+            // A failed attempt still spent a request, and a spent budget is terminal.
+            assertBudget();
             const name = error instanceof Error ? error.name : "unknown";
             const transient =
               status === 408 ||

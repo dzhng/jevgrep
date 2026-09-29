@@ -113,6 +113,27 @@ test("concurrency is a positive search-only limit and does not change cache poli
     expect(() => parseCommand([...args, "--concurrency", "2"])).toThrow();
 });
 
+test("provider budgets are optional positive ceilings and stay unset by default", () => {
+  expect(parseCommand(["question"])).toMatchObject({
+    kind: "search",
+    policy: {},
+  });
+  expect("maxRequests" in parseCommand(["question"])).toBe(false);
+  expect("maxTokens" in parseCommand(["question"])).toBe(false);
+  expect(
+    parseCommand(["question", "--max-requests", "250", "--max-tokens", "500000"]),
+  ).toMatchObject({
+    kind: "search",
+    maxRequests: 250,
+    maxTokens: 500000,
+  });
+  for (const flag of ["--max-requests", "--max-tokens"])
+    for (const value of ["0", "-1", "1.5", "NaN", "1e2", "9007199254740992"])
+      expect(() => parseCommand(["question", `${flag}=${value}`])).toThrow("positive integer");
+  for (const args of [["doctor"], ["auth"], ["skill"], ["cache", "clear"], ["files"]])
+    expect(() => parseCommand([...args, "--max-requests", "1"])).toThrow();
+});
+
 test("files takes an optional root and only the filesystem policy flags", () => {
   expect(parseCommand(["files"])).toEqual({ kind: "files", root: process.cwd(), policy: {} });
   expect(parseCommand(["files", "src", "--hidden", "--no-ignore"])).toEqual({

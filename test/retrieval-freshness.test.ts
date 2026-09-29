@@ -71,7 +71,7 @@ for (const mutation of ["ignored", "changed"] as const)
         port: 0,
         async fetch(request) {
           const body = (await request.json()) as any;
-          if (body.questions.implementation) {
+          if (Array.isArray(body.state?.files)) {
             role = true;
             await writeFile(
               join(root, mutation === "ignored" ? ".ignore" : "a.ts"),
@@ -162,7 +162,7 @@ for (const phase of ["selection", "role"] as const)
         async fetch(request) {
           const body = (await request.json()) as any;
           const targeted =
-            phase === "role" ? !!body.questions.implementation : !!body.state.declarations;
+            phase === "role" ? Array.isArray(body.state?.files) : !!body.state.declarations;
           if (targeted) {
             uploads++;
             await writeFile(join(root, ".ignore"), "a.ts\n");

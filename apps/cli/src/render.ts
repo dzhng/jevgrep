@@ -37,8 +37,11 @@ export function renderResult(
     });
   const context = result.repositoryContext;
   const omittedCount = files.filter(({ omitted }) => omitted).length;
+  const count = (value: number) => value.toLocaleString("en-US");
+  const { requests, cacheHits, inputTokens } = result.counts;
   const lines = [
     `Jevgrep: ${files.length} relevant files${result.status !== "complete" ? "; discovery incomplete" : ""}.`,
+    `Jev requests: ${count(requests)} (${count(cacheHits)} served from cache)${inputTokens === undefined ? "" : `; input tokens: ${count(inputTokens)}`}.`,
     "Symbols use name@start-end. Roles are estimates; locations-only files remain reading leads.",
     `AGENTS.md lookup (root and returned-file ancestors): ${context.instructionFiles.length ? context.instructionFiles.map(quote).join(", ") : "none found"}${context.instructionLookupIncomplete ? "; lookup incomplete" : ""}.`,
     ...(result.status === "interrupted" ? ["Interrupted."] : []),
