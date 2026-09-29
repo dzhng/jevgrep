@@ -107,7 +107,7 @@ test("valid contextual rejection retracts selection without promoting surroundin
   expect(second.file.roles).toEqual(["implementation"]);
 });
 
-test("provider failures retain successful groups and fatal failures stop subsequent groups", async () => {
+test("provider failures retain successful groups and fatal failures discard subsequent groups", async () => {
   const source = Array.from({ length: 400 }, (_, i) => `function f${i}() { return ${i}; }\n`).join(
     "",
   );
@@ -133,7 +133,8 @@ test("provider failures retain successful groups and fatal failures stop subsequ
     );
     expect(result.issues).toEqual([{ kind, count: 1 }]);
     if (kind === "provider") expect(calls).toBeGreaterThan(2);
-    else expect(calls).toBe(2);
+    // All four groups share one window and are sent before the failure is observed.
+    else expect(calls).toBe(4);
     expect(result.file.selected[0]?.startLine).toBe(1);
     expect(result.file.selected.some((range) => range.endLine === 400)).toBe(kind === "provider");
     expect(rejected.length).toBeGreaterThan(0);
@@ -273,4 +274,98 @@ test("scope excludes analogous code while a concrete reference can recover it", 
   );
   expect(second.file.selected).toEqual([{ startLine: 1, endLine: 1 }]);
   expect(second.file.presentationExcerpts?.[0]?.source).toContain("export function helper()");
+});
+
+test("a file's groups overlap while preparation and applied answers keep source order", async () => {
+  // 600 declarations make five groups of at most 128.
+  const source = Array.from({ length: 600 }, (_, i) => `function f${i}() { return ${i}; }\n`).join(
+    "",
+  );
+  let preparing = false;
+  let prepares = 0;
+  let active = 0;
+  let maxActive = 0;
+  const fake: Evaluator = {
+    requests: 0,
+    async evaluate(request) {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      const first = (request.state as { declarations: Declaration[] }).declarations[0]!;
+      // Later groups answer first, so applying answers in completion order would reorder leads.
+      const group = Math.floor(Number(first.name.slice(1)) / 128);
+      await new Promise((resolve) => setTimeout(resolve, 50 - group * 10));
+      active--;
+      return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9]));
+    },
+  };
+  const result = await selectFile(
+    { path: "ordered.ts", contentHash: "ordered", source },
+    "q",
+    0.9,
+    fake,
+    async () => {
+      expect(preparing).toBe(false);
+      preparing = true;
+      prepares++;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      preparing = false;
+      return {};
+    },
+  );
+  expect(prepares).toBe(5);
+  expect(maxActive).toBe(5);
+  expect(result.issues).toEqual([]);
+  expect(result.file.leads.map((lead) => lead.name)).toEqual(
+    Array.from({ length: 600 }, (_, i) => `f${i}`),
+  );
+  expect(result.file.selected).toEqual([{ startLine: 1, endLine: 600 }]);
+});
+
+test("a failure or invalidation observed during preparation stops later dispatch", async () => {
+  const snapshot = {
+    path: "stop.ts",
+    contentHash: "stop",
+    source: Array.from({ length: 600 }, (_, i) => `function f${i}() { return ${i}; }\n`).join(""),
+  };
+  let calls = 0;
+  const failed = await selectFile(
+    snapshot,
+    "q",
+    0.9,
+    {
+      requests: 0,
+      async evaluate() {
+        calls++;
+        throw new EvaluationFailure("authentication");
+      },
+    },
+    async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return {};
+    },
+  );
+  expect(calls).toBe(1);
+  expect(failed.issues).toEqual([{ kind: "authentication", count: 1 }]);
+  expect(failed.file.selected).toEqual([]);
+
+  let prepares = 0;
+  let requests = 0;
+  const invalidated = await selectFile(
+    snapshot,
+    "q",
+    0.9,
+    {
+      requests: 0,
+      async evaluate(request) {
+        requests++;
+        return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9]));
+      },
+    },
+    async () => (++prepares === 3 ? null : {}),
+  );
+  expect(prepares).toBe(3);
+  expect(requests).toBe(2);
+  expect(invalidated.file.sourceOmitted).toBe(true);
+  expect(invalidated.file.selected).toEqual([]);
+  expect(invalidated.file.leads).toEqual([]);
 });
