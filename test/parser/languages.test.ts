@@ -101,3 +101,19 @@ test("Go/Rust syntax and size fallbacks preserve every Unicode source byte", asy
     assert.ok(result.units.every((unit) => Buffer.byteLength(sourceForUnit(snapshot, unit)) <= 8));
   }
 });
+
+test("Rust declarations after long comment runs keep their attributes and parse quickly", async () => {
+  const notes = Array.from({ length: 20_000 }, (_, i) => `// note ${i}`).join("\n");
+  const source = `${notes}\n#[inline]\n/// Docs.\nfn first() {}\n\nfn second() {} // trailing\n${notes}\nfn third() {}\n`;
+  const started = performance.now();
+  const result = await inspect(
+    { path: "notes.rs", source, contentHash: "fixture" },
+    { maxUnitBytes: Buffer.byteLength(source) },
+  );
+  // Walking back through the run was quadratic: 20,000 comment lines took 19 s.
+  assert.ok(performance.now() - started < 5_000, "comment runs were not handled quickly");
+  assert.deepEqual(
+    result.units.map(({ name, range }) => `${name}@${range.startLine}-${range.endLine}`),
+    ["first@1-20003", "second@20005-20005", "third@20006-40006"],
+  );
+});

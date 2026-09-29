@@ -43,15 +43,17 @@ export function declarations(root, language) {
       units.push({ name, range: range(node) });
     }
   else {
-    function startWithAttributes(node) {
-      let start = node;
+    // `siblings` are the parent's named children and `index` is the node's position in them.
+    // previousNamedSibling costs time proportional to the node's position, so walking back
+    // through a long comment run with it was quadratic: 20,000 comment lines took 19 s.
+    function startWithAttributes(siblings, index) {
+      let start = index;
       while (
-        start.previousNamedSibling &&
-        (start.previousNamedSibling.type === "attribute_item" ||
-          comment(start.previousNamedSibling))
+        start > 0 &&
+        (siblings[start - 1].type === "attribute_item" || comment(siblings[start - 1]))
       ) {
-        const previous = start.previousNamedSibling;
-        const before = previous.previousNamedSibling;
+        const previous = siblings[start - 1];
+        const before = start > 1 ? siblings[start - 2] : undefined;
         if (
           comment(previous) &&
           before &&
@@ -60,16 +62,16 @@ export function declarations(root, language) {
           before.endPosition.row === previous.startPosition.row
         )
           break;
-        start = start.previousNamedSibling;
+        start--;
       }
-      return range(start).startLine;
+      return range(siblings[start]).startLine;
     }
     function visit(nodes, prefix = "", headers = []) {
       const ownedHeaders = [
         ...headers,
         ...nodes.filter((node) => node.type === "inner_attribute_item").map(range),
       ];
-      for (const node of nodes) {
+      for (const [index, node] of nodes.entries()) {
         if (comment(node) || ["attribute_item", "inner_attribute_item"].includes(node.type))
           continue;
         const body =
@@ -80,7 +82,7 @@ export function declarations(root, language) {
           field(node, "type")?.text ||
           field(node, "macro")?.text ||
           node.type;
-        const startLine = startWithAttributes(node);
+        const startLine = startWithAttributes(nodes, index);
         if (
           body &&
           body.namedChildren.some(
