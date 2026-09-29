@@ -46,6 +46,11 @@ const providers = {
     url: "https://opencode.ai/zen/v1/systemone",
     model: "jev-1.13",
   },
+  beatapi: {
+    label: "BeatAPI",
+    url: "https://api.beatapi.io/v1/systemone",
+    model: "jev-1.13-free",
+  },
 };
 const fixtureKey = "installed-http-fixture-key";
 const forbidden = "INSTALLED_FIXTURE_IGNORED_CONTENT_MUST_NEVER_UPLOAD";

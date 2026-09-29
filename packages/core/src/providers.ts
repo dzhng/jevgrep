@@ -19,6 +19,11 @@ export const providers = {
     baseURL: "https://opencode.ai/zen/v1",
     model: "jev-1.13",
   },
+  beatapi: {
+    label: "BeatAPI",
+    baseURL: "https://api.beatapi.io/v1",
+    model: "jev-1.13-free",
+  },
 } as const;
 
 export type ProviderId = keyof typeof providers;
