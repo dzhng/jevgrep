@@ -142,22 +142,23 @@ search or optimal treatment of minified source. A change to question grouping is
 a separate retrieval-policy experiment. **Verdict:** sound under the preservation
 constraint. **Confidence:** medium. Owner: [selection](../../../packages/core/src/selection.ts).
 
-### Enforce the cache bound by scanning stored entries
+### Enforce the cache bound with conservative accounting and reconciliation
 
 **When:** cache integration and performance review.
 
-A new answer is ready to save while the cache is near its disk limit. The cache
-publishes the complete answer atomically, then scans stored entries in filesystem
-enumeration order and removes entries beyond the retained byte budget. This is
-not oldest-first eviction. It does not maintain a separate persistent index or run a
-background cleanup service. With many entries, repeating that scan for many new
-answers adds overhead; an indexed eviction design would trade that work for
-another stateful component to maintain.
+Answers publish atomically. An initial census establishes retained bytes; later
+writes charge their entire payload, conservatively overcounting replacements.
+The cache reconciles when the budget is exceeded, directory metadata changes,
+or periodic write-time maintenance is due. Reconciliation also removes abandoned
+publications. Eviction follows filesystem enumeration order, not oldest-first
+order. There is no persistent index or background cleanup service.
 
 **Gap:** the cache size bound was fixed but its maintenance mechanism was open.
-**Reach:** storage is best effort, and large-cache write throughput is limited by
-repeated scans. This mechanism makes no throughput claim. **Verdict:** sound as a
-simple bounded-storage owner with a disclosed cost. **Confidence:** medium.
+**Reach:** same-instance mutations are serialized, while storage bounds across
+concurrent processes remain best effort. The first write and saturated or
+externally changing caches still incur scans; ordinary writes with byte headroom
+avoid them. **Verdict:** bounded local accounting avoids repeated census work
+without adding a persistent state owner. **Confidence:** medium.
 Owner: [cache](../../../packages/core/src/cache.ts).
 
 ## Sound — high confidence
@@ -220,6 +221,11 @@ source packets and credentials are not cache payloads. Clearing the cache rename
 the current entries directory away before removing it. A concurrent writer can
 create a new directory, so clearing does not pause other searches or promise to
 remove their later writes.
+
+Budget-triggered eviction leaves headroom for later writes, so a full cache does
+not require another census for every small answer. A single valid entry may use
+the whole budget. Directory changes and periodic reconciliation still recover
+from external writes; local byte accounting remains best effort.
 
 **Gap:** the result schema needed to distinguish persistence trouble from failed
 retrieval, and concurrent clear needed an ownership rule. **Reach:** callers must

@@ -1,5 +1,5 @@
 import { testIfDocker as test } from "../../../test/helpers/docker";
-import { afterEach, expect } from "bun:test";
+import { afterEach, expect, spyOn } from "bun:test";
 import {
   mkdtemp,
   readdir,
@@ -10,7 +10,9 @@ import {
   chmod,
   mkdir,
   symlink,
+  utimes,
 } from "node:fs/promises";
+import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createEvaluationCache, type CacheInput } from "../src/cache";
@@ -208,4 +210,126 @@ test("unavailable or symlinked cache locations never throw or modify the target"
   expect(await readFile(join(target, "sentinel"), "utf8")).toBe("DO_NOT_TOUCH");
   expect(await readdir(target)).toEqual(["sentinel"]);
   expect(cache.stats().issues).toEqual([{ kind: "cache_unavailable", count: 3 }]);
+});
+
+test("writes below the byte budget amortize entry censuses", async () => {
+  const dir = await directory();
+  const cache = createEvaluationCache({ directory: dir });
+  await cache.put(input, { question1: 0.5 });
+  const probe = spyOn(fs, "lstat");
+  try {
+    for (let index = 0; index < 20; index++)
+      await cache.put({ ...input, request: { index } }, { question1: index / 20 });
+    const entryStats = probe.mock.calls.filter(([path]) => String(path).endsWith(".json"));
+    expect(entryStats.length).toBe(0);
+    expect(await cache.get({ ...input, request: { index: 19 } })).toEqual({ question1: 0.95 });
+  } finally {
+    probe.mockRestore();
+  }
+});
+
+test("external publishers and replaced generations are reconciled before further writes", async () => {
+  const dir = await directory();
+  const cache = createEvaluationCache({ directory: dir, maxBytes: 180 });
+  await cache.put(input, { question1: 0.5 });
+  const external = createEvaluationCache({ directory: dir });
+  for (let index = 0; index < 4; index++)
+    await external.put({ ...input, request: { index } }, { question1: 0.25 });
+  await cache.put(input, { question1: 0.75 });
+  const sizes = await Promise.all(
+    (await readdir(join(dir, "entries"))).map(
+      async (name) => (await stat(join(dir, "entries", name))).size,
+    ),
+  );
+  expect(sizes.reduce((sum, size) => sum + size, 0)).toBeLessThanOrEqual(180);
+  await external.clear();
+  await cache.put(input, { question1: 1 });
+  expect(await cache.get(input)).toEqual({ question1: 1 });
+});
+
+test("periodic maintenance catches in-place growth and removes abandoned publications", async () => {
+  const dir = await directory();
+  const pending = join(dir, "entries", ".pending-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  await mkdir(join(dir, "entries"), { recursive: true });
+  await writeFile(pending, "unfinished");
+  let clock = Date.now();
+  const cache = createEvaluationCache({ directory: dir, maxBytes: 180, now: () => clock });
+  await cache.put(input, { question1: 0.5 });
+  expect(await readFile(pending, "utf8")).toBe("unfinished");
+  const name = (await readdir(join(dir, "entries"))).find((name) => name.endsWith(".json"))!;
+  // Neither of these in-place changes alters the entries directory metadata.
+  await writeFile(join(dir, "entries", name), "x".repeat(400));
+  await utimes(pending, new Date(0), new Date(0));
+  clock += 60_001;
+  await cache.put({ ...input, request: { next: true } }, { question1: 0.75 });
+  const names = await readdir(join(dir, "entries"));
+  expect(names).not.toContain(name);
+  expect(names).not.toContain(pending.split("/").at(-1)!);
+  expect(await cache.get({ ...input, request: { next: true } })).toEqual({ question1: 0.75 });
+});
+
+test("saturated cache leaves room for several writes after eviction", async () => {
+  const dir = await directory();
+  const now = () => 1000;
+  const answers = { question1: 0.5 };
+  const bytes = Buffer.byteLength(JSON.stringify({ schema: 1, createdAt: now(), answers }));
+  const maxBytes = bytes * 100;
+  const cache = createEvaluationCache({ directory: dir, maxBytes, now });
+  for (let index = 0; index < 101; index++)
+    await cache.put({ ...input, request: { index } }, answers);
+  const probe = spyOn(fs, "lstat");
+  try {
+    for (let index = 101; index < 106; index++)
+      await cache.put({ ...input, request: { index } }, answers);
+    expect(probe.mock.calls.filter(([path]) => String(path).endsWith(".json")).length).toBe(0);
+    for (let index = 101; index < 106; index++)
+      expect(await cache.get({ ...input, request: { index } })).toEqual(answers);
+  } finally {
+    probe.mockRestore();
+  }
+  const sizes = await Promise.all(
+    (await readdir(join(dir, "entries"))).map(
+      async (name) => (await stat(join(dir, "entries", name))).size,
+    ),
+  );
+  expect(sizes.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(maxBytes);
+});
+
+test("eviction headroom still permits one entry as large as the cache budget", async () => {
+  const now = () => 1000;
+  const maxBytes = Buffer.byteLength(
+    JSON.stringify({ schema: 1, createdAt: now(), answers: { question1: 0.5 } }),
+  );
+  const cache = createEvaluationCache({ directory: await directory(), maxBytes, now });
+  await cache.put(input, { question1: 0.4 });
+  await cache.put(input, { question1: 0.5 });
+  expect(await cache.get(input)).toEqual({ question1: 0.5 });
+});
+
+test("incomplete censuses do not evict below the budget", async () => {
+  const dir = await directory();
+  const now = () => 1000;
+  const answers = { question1: 0.5 };
+  const bytes = Buffer.byteLength(JSON.stringify({ schema: 1, createdAt: now(), answers }));
+  const cache = createEvaluationCache({ directory: dir, maxBytes: bytes * 100, now });
+  for (let index = 0; index < 95; index++)
+    await cache.put({ ...input, request: { index } }, answers);
+  const names = await readdir(join(dir, "entries"));
+  const broken = join(dir, "entries", names[0]!);
+  const original = fs.lstat;
+  const probe = spyOn(fs, "lstat").mockImplementation((...args) => {
+    if (String(args[0]) === broken)
+      return Promise.reject(Object.assign(new Error("fixture I/O failure"), { code: "EIO" }));
+    return original(...args);
+  });
+  try {
+    const fresh = createEvaluationCache({ directory: dir, maxBytes: bytes * 100, now });
+    await fresh.put({ ...input, request: { index: 95 } }, answers);
+    const remaining = await readdir(join(dir, "entries"));
+    expect(remaining.length).toBe(96);
+    for (const name of names) expect(remaining).toContain(name);
+    expect(fresh.stats().issues.some((issue) => issue.kind === "cache_unavailable")).toBe(true);
+  } finally {
+    probe.mockRestore();
+  }
 });

@@ -155,9 +155,21 @@ export function createEvaluationCache(options: CacheOptions) {
       if (!missing(error)) throw error;
     }
   }
-  async function trim() {
+  let maintenance: { bytes: number; generation: string; checkedAt: number } | undefined;
+  let writes: Promise<void> = Promise.resolve();
+  function serialize(work: () => Promise<void>) {
+    const pending = writes.then(work);
+    writes = pending.catch(() => {});
+    return pending;
+  }
+  async function generation() {
+    const info = await lstat(entries, { bigint: true });
+    return `${info.dev}:${info.ino}:${info.mtimeNs}:${info.ctimeNs}`;
+  }
+  async function trim(retainBytes: number) {
     // Streaming retention bounds memory even with many tiny entries. Eviction is deliberately not LRU.
     let retainedBytes = 0;
+    let complete = true;
     const scan = await opendir(entries);
     for await (const entry of scan) {
       if (!entryName.test(entry.name) && !pendingName.test(entry.name)) continue;
@@ -170,12 +182,25 @@ export function createEvaluationCache(options: CacheOptions) {
           if (Date.now() - info.mtimeMs > 60 * 60 * 1000) await remove(path);
           continue;
         }
-        if (retainedBytes + info.size > maxBytes) await remove(path);
+        // Keep one valid entry even when it exceeds the low-water mark.
+        if (retainedBytes + info.size > (retainedBytes ? retainBytes : maxBytes))
+          await remove(path);
         else retainedBytes += info.size;
       } catch (error) {
-        if (!missing(error)) warn("cache_unavailable");
+        if (!missing(error)) {
+          complete = false;
+          warn("cache_unavailable");
+        }
       }
     }
+    return complete ? retainedBytes : undefined;
+  }
+  async function reconcile(retainBytes = maxBytes) {
+    maintenance = undefined;
+    await cleanupDetached();
+    const bytes = await trim(retainBytes);
+    if (bytes !== undefined)
+      maintenance = { bytes, generation: await generation(), checkedAt: now() };
   }
   async function cleanupDetached() {
     const scan = await opendir(directory);
@@ -204,7 +229,16 @@ export function createEvaluationCache(options: CacheOptions) {
       }
       const destination = join(entries, `${key(input)}.json`);
       await prepare(true);
-      await cleanupDetached();
+      // Directory changes reveal other publishers and clear generations. Periodic
+      // reconciliation also catches in-place edits and crash remnants without a daemon.
+      const current = await generation();
+      if (
+        !maintenance ||
+        maintenance.generation !== current ||
+        now() < maintenance.checkedAt ||
+        now() - maintenance.checkedAt >= 60_000
+      )
+        await reconcile();
       temporary = join(entries, `.pending-${randomUUID()}`);
       handle = await open(
         temporary,
@@ -216,8 +250,22 @@ export function createEvaluationCache(options: CacheOptions) {
       handle = undefined;
       await rename(temporary, destination);
       temporary = undefined;
-      await trim();
+      // Charging the full payload overestimates replacements, keeping local writes
+      // bounded without retaining an entry index. Cross-process bounds are best effort.
+      if (maintenance) maintenance.bytes += Buffer.byteLength(payload);
+      if (!maintenance) {
+        // An incomplete census does not establish budget pressure.
+        await reconcile();
+      } else if (maintenance.bytes > maxBytes) {
+        // Evict below the limit so a saturated cache does not rescan on every write.
+        await reconcile(Math.floor(maxBytes * 0.9));
+      } else {
+        // This may absorb a concurrent external publish; periodic reconciliation
+        // catches changes missed by directory timestamps or this observation window.
+        maintenance.generation = await generation();
+      }
     } catch {
+      maintenance = undefined;
       warn("cache_unavailable");
     } finally {
       try {
@@ -236,6 +284,7 @@ export function createEvaluationCache(options: CacheOptions) {
   }
   async function clear(): Promise<void> {
     // Detach the current generation atomically. Later writers create a new one; no global lock or pause.
+    maintenance = undefined;
     const detached = join(directory, `.cleared-${randomUUID()}`);
     try {
       await checkDirectory(directory, false);
@@ -253,6 +302,11 @@ export function createEvaluationCache(options: CacheOptions) {
   function stats() {
     return { hits, misses, issues: [...issues].map(([kind, count]) => ({ kind, count })) };
   }
-  return { get, put, clear, stats };
+  return {
+    get,
+    put: (input: CacheInput, answers: CacheAnswers) => serialize(() => put(input, answers)),
+    clear: () => serialize(clear),
+    stats,
+  };
 }
 export type EvaluationCache = ReturnType<typeof createEvaluationCache>;
