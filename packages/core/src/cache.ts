@@ -27,6 +27,13 @@ export type CacheOptions = {
 const schema = 1;
 const entryName = /^[a-f0-9]{64}\.json$/;
 const pendingName = /^\.pending-[a-f0-9-]+$/;
+// Abandoned publications after a crash must not accumulate forever; current writes get an hour.
+const pendingLifetimeMs = 60 * 60 * 1000;
+const maintenanceIntervalMs = 60 * 60 * 1000;
+/** Tiny answer files still occupy whole filesystem blocks; the byte bound counts that space. */
+function allocated(size: number, blocks = 0) {
+  return Math.max(Math.ceil(size / 4096) * 4096, blocks * 512);
+}
 
 function validAnswers(value: unknown): value is CacheAnswers {
   return (
@@ -155,27 +162,103 @@ export function createEvaluationCache(options: CacheOptions) {
       if (!missing(error)) throw error;
     }
   }
-  async function trim() {
-    // Streaming retention bounds memory even with many tiny entries. Eviction is deliberately not LRU.
-    let retainedBytes = 0;
-    const scan = await opendir(entries);
-    for await (const entry of scan) {
-      if (!entryName.test(entry.name) && !pendingName.test(entry.name)) continue;
-      const path = join(entries, entry.name);
+  let checked = false;
+  let sweeping: Promise<void> | undefined;
+  /** Allocated bytes seen by the last sweep plus this process's writes since then. */
+  let estimate = 0;
+  // Its mtime records the last completed sweep by any process, on the cache clock.
+  const stamp = join(directory, "maintained");
+  async function maintenanceDue() {
+    try {
+      const info = await lstat(stamp);
+      const age = now() - info.mtimeMs;
+      return !info.isFile() || age < 0 || age >= maintenanceIntervalMs;
+    } catch {
+      return true;
+    }
+  }
+  /** A directory pass runs at most once per interval across processes, or when this process's
+   * writes exceed the budget. Entry age is its mtime on the cache clock, so no entry is opened.
+   * Between passes the budget can be exceeded by recent writes. Eviction is deliberately not LRU:
+   * reads never write, and the oldest answers go first. */
+  async function maintain(): Promise<number> {
+    await cleanupDetached();
+    const names: string[] = [];
+    for await (const entry of await opendir(entries))
+      if (entryName.test(entry.name) || pendingName.test(entry.name)) names.push(entry.name);
+    const retained: Array<{ name: string; mtimeMs: number; bytes: number }> = [];
+    let total = 0;
+    await pooled(names, async (name) => {
+      const path = join(entries, name);
       try {
         const info = await lstat(path);
-        if (!info.isFile() || info.isSymbolicLink()) continue;
-        if (pendingName.test(entry.name)) {
-          // Abandoned publications after a crash must not accumulate forever; current writes get an hour.
-          if (Date.now() - info.mtimeMs > 60 * 60 * 1000) await remove(path);
-          continue;
+        // lstat does not follow links: symlinks and special files are skipped, never touched.
+        if (!info.isFile()) return;
+        // Future timestamps are other writers' fresh entries or clock changes, never expiry.
+        const age = now() - info.mtimeMs;
+        if (pendingName.test(name)) {
+          if (age > pendingLifetimeMs) await remove(path);
+        } else if (age >= ttlMs) await remove(path);
+        else {
+          const bytes = allocated(info.size, info.blocks);
+          retained.push({ name, mtimeMs: info.mtimeMs, bytes });
+          total += bytes;
         }
-        if (retainedBytes + info.size > maxBytes) await remove(path);
-        else retainedBytes += info.size;
       } catch (error) {
         if (!missing(error)) warn("cache_unavailable");
       }
+    });
+    if (total > maxBytes) {
+      // Leave headroom so the next few writes do not immediately trigger another pass.
+      const target = maxBytes - Math.floor(maxBytes / 8);
+      retained.sort((a, b) => a.mtimeMs - b.mtimeMs || (a.name < b.name ? -1 : 1));
+      const evicted: typeof retained = [];
+      for (const entry of retained) {
+        if (total <= target) break;
+        evicted.push(entry);
+        total -= entry.bytes;
+      }
+      await pooled(evicted, async (entry) => {
+        try {
+          await remove(join(entries, entry.name));
+        } catch {
+          total += entry.bytes;
+          warn("cache_unavailable");
+        }
+      });
     }
+    return total;
+  }
+  /** Bounded parallel filesystem work; each task handles its own errors. */
+  async function pooled<T>(items: T[], work: (item: T) => Promise<void>) {
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(16, items.length) }, async () => {
+        while (next < items.length) await work(items[next++]!);
+      }),
+    );
+  }
+  function sweep() {
+    sweeping ??= (async () => {
+      try {
+        estimate = await maintain();
+        const handle = await open(
+          stamp,
+          constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW,
+          0o600,
+        );
+        try {
+          await handle.utimes(now() / 1000, now() / 1000);
+        } finally {
+          await handle.close();
+        }
+      } catch (error) {
+        if (!missing(error)) warn("cache_unavailable");
+      } finally {
+        sweeping = undefined;
+      }
+    })();
+    return sweeping;
   }
   async function cleanupDetached() {
     const scan = await opendir(directory);
@@ -197,14 +280,15 @@ export function createEvaluationCache(options: CacheOptions) {
         warn("cache_corrupt");
         return;
       }
-      const payload = JSON.stringify({ schema, createdAt: now(), answers });
-      if (Buffer.byteLength(payload) > maxEntryBytes) {
+      const createdAt = now();
+      const payload = JSON.stringify({ schema, createdAt, answers });
+      const size = Buffer.byteLength(payload);
+      if (size > maxEntryBytes || allocated(size) > maxBytes) {
         warn("cache_limit");
         return;
       }
       const destination = join(entries, `${key(input)}.json`);
       await prepare(true);
-      await cleanupDetached();
       temporary = join(entries, `.pending-${randomUUID()}`);
       handle = await open(
         temporary,
@@ -212,11 +296,17 @@ export function createEvaluationCache(options: CacheOptions) {
         0o600,
       );
       await handle.writeFile(payload);
+      // Maintenance reads age from mtime; keep it on the same clock as createdAt.
+      await handle.utimes(createdAt / 1000, createdAt / 1000);
       await handle.close();
       handle = undefined;
       await rename(temporary, destination);
       temporary = undefined;
-      await trim();
+      estimate += allocated(size);
+      if (!checked) {
+        checked = true;
+        if (await maintenanceDue()) await sweep();
+      } else if (estimate > maxBytes) await sweep();
     } catch {
       warn("cache_unavailable");
     } finally {
@@ -242,9 +332,11 @@ export function createEvaluationCache(options: CacheOptions) {
       try {
         await checkDirectory(entries, false);
         await rename(entries, detached);
+        estimate = 0;
       } catch (error) {
         if (!missing(error)) throw error;
       }
+      await remove(stamp);
       await cleanupDetached();
     } catch (error) {
       if (!missing(error)) warn("cache_unavailable");

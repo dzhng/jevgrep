@@ -142,22 +142,27 @@ search or optimal treatment of minified source. A change to question grouping is
 a separate retrieval-policy experiment. **Verdict:** sound under the preservation
 constraint. **Confidence:** medium. Owner: [selection](../../../packages/core/src/selection.ts).
 
-### Enforce the cache bound by scanning stored entries
+### Enforce the cache bound with periodic oldest-first sweeps
 
-**When:** cache integration and performance review.
+**When:** cache integration; revised after measuring per-write scans.
 
 A new answer is ready to save while the cache is near its disk limit. The cache
-publishes the complete answer atomically, then scans stored entries in filesystem
-enumeration order and removes entries beyond the retained byte budget. This is
-not oldest-first eviction. It does not maintain a separate persistent index or run a
-background cleanup service. With many entries, repeating that scan for many new
-answers adds overhead; an indexed eviction design would trade that work for
-another stateful component to maintain.
+publishes the complete answer atomically and sets its modification time to the
+answer's creation time; that write does not scan the directory. A sweep runs on a
+process's first write when the shared `maintained` stamp is missing, in the future
+or more than an hour old, and again when that process's own writes push its
+estimate past the budget. The sweep reads metadata only. It removes expired entries
+and abandoned publications, then removes the oldest answers until allocated blocks
+fall to seven eighths of the budget. Tiny answers are charged whole filesystem
+blocks, so the bound tracks disk use rather than payload bytes. There is still no
+index or background service.
 
-**Gap:** the cache size bound was fixed but its maintenance mechanism was open.
-**Reach:** storage is best effort, and large-cache write throughput is limited by
-repeated scans. This mechanism makes no throughput claim. **Verdict:** sound as a
-simple bounded-storage owner with a disclosed cost. **Confidence:** medium.
+**Gap:** the cache size bound was fixed but its maintenance mechanism was open. The
+first design rescanned every entry after each write, and at 40,000 entries each
+write took about a second while holding a request slot. **Reach:** storage remains
+best effort. Other processes' writes can exceed the budget until the next sweep,
+and the write that triggers a sweep pays for one metadata pass. **Verdict:** sound
+as a bounded-storage owner without per-write scans. **Confidence:** medium.
 Owner: [cache](../../../packages/core/src/cache.ts).
 
 ## Sound — high confidence
