@@ -11,6 +11,7 @@ RUN bun install --frozen-lockfile
 COPY apps/cli apps/cli
 COPY packages/core packages/core
 COPY test test
+COPY .github/workflows/publish.yml .github/workflows/publish.yml
 COPY scripts scripts
 COPY skills skills
 COPY LICENSE LICENSE

@@ -167,3 +167,77 @@ test("external Python runtime notices retain conflicting metadata and component 
   assert.match(notices, /Apache License/);
   await assert.rejects(pythonRuntimeNotices("0.26.0"), /Review Python runtime notices/);
 });
+
+test("publish job binds archive identity and dist-tag to the pushed tag", async (t) => {
+  const { mkdtemp, mkdir, readFile, writeFile, rm, appendFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { execFileSync, spawnSync } = await import("node:child_process");
+  const { createHash } = await import("node:crypto");
+  const workflow = await readFile(
+    new URL("../.github/workflows/publish.yml", import.meta.url),
+    "utf8",
+  );
+  const inline = workflow
+    .match(/node --input-type=module <<'NODE'\n([\s\S]*?)\n          NODE/)[1]
+    .split("\n")
+    .map((line) => line.slice(10))
+    .join("\n");
+  const root = await mkdtemp(join(tmpdir(), "jg-publish-check-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "package"));
+  await mkdir(join(root, "jevgrep-release"));
+  const check = (env) =>
+    spawnSync(process.execPath, ["--input-type=module", "-e", inline], {
+      env: { ...process.env, RUNNER_TEMP: root, ...env },
+      encoding: "utf8",
+    });
+  async function pack(version, packageMetadata = { name: "@dzhng/jevgrep", version }) {
+    await writeFile(join(root, "package/package.json"), JSON.stringify(packageMetadata));
+    const archive = join(root, "jevgrep-release", `dzhng-jevgrep-${version}.tgz`);
+    execFileSync("tar", ["-czf", archive, "-C", root, "package"]);
+    const env = {
+      RELEASE_VERSION: version,
+      GITHUB_REF_NAME: `v${version}`,
+      RELEASE_DIST_TAG: version.includes("-") ? "next" : "latest",
+      RELEASE_INTEGRITY:
+        "sha512-" +
+        createHash("sha512")
+          .update(await readFile(archive))
+          .digest("base64"),
+    };
+    return { archive, env };
+  }
+  const { archive, env } = await pack("1.2.3");
+  assert.equal(check(env).status, 0);
+  for (const [overrides, message] of [
+    [{ GITHUB_REF_NAME: "v99.0.0" }, /pushed tag/],
+    [{ RELEASE_DIST_TAG: "next" }, /Unexpected dist-tag/],
+    [{ RELEASE_DIST_TAG: "custom" }, /Unexpected dist-tag/],
+    ...["../x", "01.2.3", "1.2.3-01", "0.0.0", "1.2.3+build"].map((version) => [
+      { RELEASE_VERSION: version },
+      /Invalid release version/,
+    ]),
+  ]) {
+    const result = check({ ...env, ...overrides });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, message);
+  }
+  await appendFile(archive, "tampered");
+  assert.match(check(env).stderr, /integrity mismatch/);
+  for (const packageMetadata of [
+    { name: "@dzhng/jevgrep", version: "99.0.0" },
+    { name: "another-package", version: "1.2.3" },
+  ]) {
+    const packed = await pack("1.2.3", packageMetadata);
+    const result = check(packed.env);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /package identity mismatch/);
+  }
+  const prerelease = await pack("1.3.0-rc.1");
+  assert.equal(check(prerelease.env).status, 0);
+  assert.match(
+    check({ ...prerelease.env, RELEASE_DIST_TAG: "latest" }).stderr,
+    /Unexpected dist-tag/,
+  );
+});

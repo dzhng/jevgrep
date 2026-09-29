@@ -12,18 +12,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     outputs:
       version: ${{ steps.package.outputs.version }}
       integrity: ${{ steps.package.outputs.integrity }}
+      dist_tag: ${{ steps.package.outputs.dist_tag }}
     env:
       NODE_AUTH_TOKEN: ""
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
@@ -59,22 +61,59 @@ jobs:
           RELEASE_TARBALL: ${{ steps.package.outputs.tarball }}
           RELEASE_DIST_TAG: ${{ steps.package.outputs.dist_tag }}
         run: npm publish "$RELEASE_TARBALL" --access public --tag "$RELEASE_DIST_TAG" --ignore-scripts --dry-run
-      - name: Publish the verified tarball
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          RELEASE_TARBALL: ${{ steps.package.outputs.tarball }}
-          RELEASE_DIST_TAG: ${{ steps.package.outputs.dist_tag }}
-        run: npm publish "$RELEASE_TARBALL" --access public --tag "$RELEASE_DIST_TAG" --ignore-scripts --provenance
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_VERSION: ${{ needs.build.outputs.version }}
+      RELEASE_INTEGRITY: ${{ needs.build.outputs.integrity }}
+      RELEASE_DIST_TAG: ${{ needs.build.outputs.dist_tag }}
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: jevgrep-${{ needs.build.outputs.version }}
+          path: ${{ runner.temp }}/jevgrep-release
+      - name: Verify the archive without executing package code
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { join } from 'node:path';
+          import { execFileSync } from 'node:child_process';
+          const { RUNNER_TEMP, RELEASE_VERSION, RELEASE_INTEGRITY, RELEASE_DIST_TAG, GITHUB_REF_NAME } = process.env;
+          // Keep this small identity policy aligned with releaseIdentity; never import build code here.
+          const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*))?$/.exec(RELEASE_VERSION);
+          if (!match || match[4]?.split('.').some(part => /^\d+$/.test(part) && /^0\d/.test(part)) || RELEASE_VERSION === '0.0.0') throw new Error('Invalid release version');
+          if (GITHUB_REF_NAME !== `v${RELEASE_VERSION}`) throw new Error('Version does not match the pushed tag');
+          if (RELEASE_DIST_TAG !== (match[4] ? 'next' : 'latest')) throw new Error('Unexpected dist-tag');
+          const archive = join(RUNNER_TEMP, 'jevgrep-release', `dzhng-jevgrep-${RELEASE_VERSION}.tgz`);
+          const bytes = readFileSync(archive);
+          const integrity = 'sha512-' + createHash('sha512').update(bytes).digest('base64');
+          if (integrity !== RELEASE_INTEGRITY) throw new Error('Release archive integrity mismatch');
+          const metadata = JSON.parse(execFileSync('tar', ['-xzOf', archive, 'package/package.json'], { encoding: 'utf8', maxBuffer: 1024 * 1024 }));
+          if (metadata.name !== '@dzhng/jevgrep' || metadata.version !== RELEASE_VERSION) throw new Error('Archive package identity mismatch');
+          NODE
+      - name: Publish using npm trusted publishing
+        run: npm publish "$RUNNER_TEMP/jevgrep-release/dzhng-jevgrep-$RELEASE_VERSION.tgz" --access public --tag "$RELEASE_DIST_TAG" --ignore-scripts --provenance
 
   verify-registry:
-    needs: release
+    needs: [build, publish]
     runs-on: ubuntu-latest
     env:
       NODE_AUTH_TOKEN: ""
-      RELEASE_VERSION: ${{ needs.release.outputs.version }}
-      RELEASE_INTEGRITY: ${{ needs.release.outputs.integrity }}
+      RELEASE_VERSION: ${{ needs.build.outputs.version }}
+      RELEASE_INTEGRITY: ${{ needs.build.outputs.integrity }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22

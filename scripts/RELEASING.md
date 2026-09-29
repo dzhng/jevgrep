@@ -15,13 +15,34 @@ publishing a development checkpoint.
 The [tag workflow](../.github/workflows/publish.yml) verifies, builds, packs, and
 checks canonical package content before exercising that exact archive through the
 installed Docker journeys. It retains the tarball and manifest as a workflow
-artifact and dry-runs npm publication before publishing those same bytes.
-Configure `NPM_TOKEN` as a repository Actions secret; only the publish step receives
-it as `NODE_AUTH_TOKEN`. Credentials never belong in a committed file.
+artifact and dry-runs npm publication. A fresh publish job verifies the archive
+hash and package identity against the pushed tag, then publishes those bytes without checking out the repository, installing
+project dependencies, or executing package scripts. Only that job can request
+an OIDC token. Hash verification preserves the tested bytes; it cannot detect
+malicious code already present in the build inputs.
+
+Before merging this workflow, a maintainer must configure an npm trusted
+publisher for `@dzhng/jevgrep`: GitHub owner `dzhng`, repository `jevgrep`, workflow
+`publish.yml`, environment `npm-release`. In [Allowed actions](https://docs.npmjs.com/trusted-publishers/#for-github-actions),
+permit direct publication with `npm publish`; this workflow does not use staged publication.
+Create that GitHub environment before merging: a missing environment can be
+created automatically without protection on its first use. Configure required
+reviewers and restrict deployment
+to release tags; protect creation of those tags with repository rules. The build
+job must never reference this environment. A reviewer should inspect the tag,
+workflow changes, and build evidence before approving a release.
+
+The publish job uses Node 24 with npm 11.5.1 or newer, as required by
+[npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+There is no token fallback: missing publisher configuration must fail publication.
+After verifying a successful trusted release, revoke the old npm publishing token
+and remove the `NPM_TOKEN` Actions secret. These account settings cannot be applied
+by merging this workflow. Credentials never belong in a committed file.
 
 A separate job fetches the exact registry version, checks its integrity against
 the verified archive, and installs it into a fresh Node-only runtime for the same
-fixture-backed journeys. If registry availability or smoke verification fails
+fixture-backed journeys. This job executes checkout code but has neither publishing
+credentials nor OIDC permission. If registry availability or smoke verification fails
 after publication, rerun the failed registry-verification job; a published version
 is immutable and must not be replaced.
 
