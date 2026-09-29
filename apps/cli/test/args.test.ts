@@ -59,6 +59,10 @@ test("auth requires explicit provider for stdin and keeps provider selection out
     kind: "auth",
     provider: "opencode",
   });
+  expect(parseCommand(["auth", "--provider", "beatapi", "--stdin"])).toEqual({
+    kind: "auth",
+    provider: "beatapi",
+  });
   for (const args of [
     ["auth", "--stdin"],
     ["auth", "--provider", "vercel"],
