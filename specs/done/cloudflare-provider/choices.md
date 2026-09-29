@@ -10,6 +10,20 @@ it in the one auth record keeps the rule intact: a human chooses provider, key a
 gateway once, and agents search without routing decisions. An environment variable
 or a search flag would reopen the precedence questions that record closed.
 
+### Share the custom endpoint's `baseURL` field and `--base-url` flag
+
+The custom provider already defines how a saved record names its endpoint and how
+that URL is validated. A Cloudflare-only `gatewayURL` field and `--gateway-url`
+flag would duplicate both. Cloudflare reuses them and differs only in having no
+`model`, which its route fixes.
+
+### A provider of its own, not a custom endpoint preset
+
+A custom endpoint is a TypeSafe-compatible base URL plus a model. Cloudflare's route
+takes a different path, auth header and envelope, so saving it as a custom record
+would send requests Cloudflare rejects. It is listed after the fixed presets and
+before "Custom endpoint", which stays last as the catch-all.
+
 ### Adapt the request in the evaluator's fetch hook
 
 The alternatives were a separate evaluation model for Cloudflare or an unpublished

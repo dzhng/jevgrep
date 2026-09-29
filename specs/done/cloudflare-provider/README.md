@@ -1,7 +1,7 @@
 # Cloudflare AI Gateway provider
 
-Jevgrep supports Cloudflare AI Gateway as a fourth saved provider, next to
-Vercel AI Gateway, native TypeSafe and OpenRouter. It follows the
+Jevgrep supports Cloudflare AI Gateway as a saved provider, next to the fixed
+presets and the custom TypeSafe-compatible endpoint. It follows the
 [saved-provider record](../provider-support/README.md) and keeps every invariant
 listed there. This record covers only what Cloudflare needs beyond that.
 
@@ -11,14 +11,18 @@ Cloudflare serves Jev (`typesafe/jev`) with Unified Billing, but only on the
 gateway's Workers AI route, `<gateway>/workers-ai/run/typesafe/jev`. There is no
 TypeSafe provider-native path. The probes in [research](research.md) record the
 routes that fail. So Cloudflare cannot be one more fixed base URL for the same
-adapter. It needs two things the other presets do not:
+adapter, and it cannot be a custom endpoint either: the custom provider appends
+`/systemone` and sends a TypeSafe body, which this route rejects. It needs two
+things the other providers do not combine:
 
 - **An account-specific endpoint.** The gateway URL contains the account and gateway
-  IDs, or it is the gateway's custom domain. `jg auth` saves it with the token in the
-  same single private record. Search and doctor still take no endpoint, provider or
-  environment override. The URL is setup, like the key. `createEvaluator` itself throws
-  for a Cloudflare provider without a valid URL, before any request. The CLI validates
-  the saved record first, so users see the auth message instead.
+  IDs, or it is the gateway's custom domain. `jg auth --base-url` saves it as the
+  record's `baseURL`, the same field and flag the custom provider uses, with the
+  token in the same single private record. Search and doctor still take no endpoint,
+  provider or environment override. `endpointFor` validates it with the shared
+  `validateBaseURL`, so `createEvaluator` throws for a Cloudflare provider without a
+  valid URL, before any request. The CLI validates the saved record first, so users
+  see the auth message instead.
 - **A different wire shape for one request.** The route takes the model from its
   path, authenticates the gateway token from `cf-aig-authorization`, and wraps the
   TypeSafe answer as `{state, result}`. The evaluator adapts that single request
@@ -28,12 +32,16 @@ adapter. It needs two things the other presets do not:
 
 ## What must stay true
 
-- Only a Cloudflare record carries `gatewayURL`, and a Cloudflare record without a
-  valid URL is invalid credentials. It never falls back to another provider. Other
-  providers' records are unchanged and still accept a legacy record without a provider.
-- The gateway URL must be `https`. Plain `http` is accepted only for loopback hosts.
-  The URL can't carry a query, fragment or userinfo, or exceed 2,048 characters. Auth
-  normalizes a trailing slash away.
+- A Cloudflare record is `{provider, baseURL, apiKey}` with no `model`; the model is
+  fixed by the route. A Cloudflare record without a valid URL is invalid credentials.
+  It never falls back to another provider. Other providers' records are unchanged.
+- The gateway URL follows the custom endpoint's rules: `https`, with plain `http`
+  only for `localhost` and `127.0.0.1`, and no query, fragment or userinfo. A
+  trailing slash is normalized away because the route is appended to it, and a URL
+  that already contains a `/workers-ai` or `/compat` segment is rejected rather than
+  doubled.
+- Auth and doctor name the provider and the gateway host, never the key or the
+  account path.
 - The token travels only as `cf-aig-authorization`. The request omits `Authorization`,
   and redirects are refused, because fetch would drop `Authorization` on a
   cross-origin redirect but would forward the custom header.
@@ -48,23 +56,23 @@ adapter. It needs two things the other presets do not:
 
 ## Pointers
 
-The [preset owner](../../../packages/core/src/providers.ts) holds the preset,
-`parseGatewayURL` and `cloudflareRunURL`. The
+The [provider owner](../../../packages/core/src/providers.ts) holds
+`cloudflareProviderId`, its `endpointFor` branch and `cloudflareRunURL`. The
 [evaluator](../../../packages/core/src/evaluator.ts) holds `cloudflareTransport`,
 and the [auth module](../../../apps/cli/src/auth.ts) and
-[argument parser](../../../apps/cli/src/args.ts) own `--gateway-url`.
+[argument parser](../../../apps/cli/src/args.ts) accept `--base-url` for it and
+reject `--model`.
 
 Tests route through a canonical fixture gateway,
 `https://gateway.ai.cloudflare.com/v1/fixture-account/fixture-gateway`, which the
 [test-only preload](../../../test/fixtures/provider-route.mjs) redirects to local
 HTTP. The product has no transport override.
-[Provider replay](../../../test/reference/provider-parity.test.ts) pins the frozen
-request multiset and complete stdout for Cloudflare.
 [Installed journeys](../../../test/installed.test.mjs) run auth, doctor, search,
 cache and replacement against the packed CLI.
 [Evaluator tests](../../../test/evaluator.test.ts) pin the route, headers, body,
 unwrapping, non-Completed envelopes, authentication failure, refused redirects and
-URL validation, and
+URL validation, [provider tests](../../../packages/core/test/providers.test.ts)
+pin endpoint resolution, and
 [process tests](../../../apps/cli/test/process.test.ts) cover the interactive
 gateway prompt.
 

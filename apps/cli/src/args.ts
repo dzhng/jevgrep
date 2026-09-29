@@ -1,11 +1,16 @@
 import { parseArgs } from "node:util";
 import type { SearchInput } from "@repo/core";
-import { providers, customProviderId, isCredentialProvider } from "@repo/core/providers";
+import {
+  cloudflareProviderId,
+  customProviderId,
+  isCredentialProvider,
+  providers,
+} from "@repo/core/providers";
 import { CliError } from "./errors";
 import { DEFAULT_MAX_SOURCE_BYTES } from "./render";
 import type { AuthOptions } from "./auth";
 
-const credentialProviders = [...Object.keys(providers), customProviderId];
+const credentialProviders = [...Object.keys(providers), cloudflareProviderId, customProviderId];
 
 export type Command =
   | { kind: "help" | "version" | "doctor" | "cache-clear" }
@@ -80,8 +85,17 @@ export function parseCommand(args: string[]): Command {
         model: values.model,
       };
     }
+    if (values.provider === cloudflareProviderId) {
+      if (!values["base-url"] || values.model !== undefined)
+        throw new CliError(
+          "Cloudflare AI Gateway needs --base-url GATEWAY_URL (and no --model) with --stdin.",
+        );
+      return { kind: "auth", provider: cloudflareProviderId, baseURL: values["base-url"] };
+    }
     if (values["base-url"] !== undefined || values.model !== undefined)
-      throw new CliError("--base-url and --model are only valid with --provider custom.");
+      throw new CliError(
+        "--base-url is only valid with --provider custom or cloudflare, --model only with custom.",
+      );
     return { kind: "auth", provider: values.provider };
   }
   if (first === "skill") {
@@ -195,9 +209,12 @@ Commands:
 Auth automation:
   auth --provider ${credentialProviders.join("|")} --stdin
   auth --provider custom --base-url URL --model ID --stdin
+  auth --provider cloudflare --base-url GATEWAY_URL --stdin
   Save one provider/key from a pipe. Re-running auth replaces your setup.
-  Custom endpoints must use https://; http:// is allowed only for localhost
-  and 127.0.0.1. Auth and doctor name the endpoint host, never the key.
+  A Cloudflare GATEWAY_URL is https://gateway.ai.cloudflare.com/v1/ACCOUNT/GATEWAY
+  or the gateway's custom domain. Base URLs must use https://; http:// is
+  allowed only for localhost and 127.0.0.1. Auth and doctor name the
+  endpoint host, never the key.
   Saved credentials only; provider key/URL environment variables are ignored.
 
 Skill installation options:

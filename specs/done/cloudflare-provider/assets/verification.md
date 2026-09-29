@@ -1,27 +1,30 @@
 # Cloudflare provider verification
 
-2026-09-27, macOS arm64, Node v26.9.0, bun 1.4.2. No npm release or paid benchmark was
-run. The reference manifest, covered files, corpus and frozen research skill are
-unchanged.
+Re-ported onto upstream's custom-endpoint seams after merging upstream main (0.6.0
+and later). 2026-09-29, macOS arm64, the pinned bun 1.3.14 and Docker for
+the suite. No npm release or paid benchmark was run.
 
-| Gate                                | Result                                                                                                                                                                                                             |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `bun run verify`                    | Exit 0: types, lint, 132 core/CLI/reference, 18 Node protocol, 23 parser, 4 release, 27 maintained harness and 33 installed Docker tests                                                                           |
-| `bun run format:check`              | Exit 0                                                                                                                                                                                                             |
-| After the Completed-envelope change | `bun run test` exit 0 (133 core/CLI/reference, 18 protocol, 23 parser, 4 release, 27 harness); installed cloudflare, saved-credential, invalid-record, legacy and authentication cases 11/11; live doctor verified |
-| Installed journey `cloudflare`      | Pass: auth with `--gateway-url`, doctor, cold and warm search, replacement by Vercel, unauthorized doctor without retry                                                                                            |
-| Provider replay `cloudflare`        | Pass: frozen request multiset and complete stdout; missing and invalid answers stay incomplete                                                                                                                     |
-| Evaluator mutation checks           | Removing the envelope unwrap or `redirect: "error"` fails the matching evaluator test; accepting a `Queued` envelope failed the Completed-only test before it was enforced                                         |
+| Gate                           | Result                                                                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun run check-types`, `lint`  | Exit 0 (one upstream warning in `packages/core/src/filesystem.ts`)                                                                    |
+| `bun run test` (Docker)        | Exit 0: 125 core/CLI, 18 provider protocol, 39 parser, 4 release, 30 maintained harness                                               |
+| `bun run test:installed`       | Exit 0: 42/42, including the `cloudflare` saved-provider journey and the invalid Cloudflare records                                   |
+| Installed journey `cloudflare` | Pass: auth with `--base-url`, doctor, cold and warm search, replacement by Vercel, unauthorized doctor                                |
+| Evaluator mutation checks      | Sending the token as `Authorization`, dropping `redirect: "error"`, or accepting any envelope state each fails its own evaluator test |
 
-Live checks used the development CLI with an isolated `XDG_CONFIG_HOME` and a token
-scoped to Account > AI Gateway Run only:
+`oxfmt --check .` reports only upstream files outside this change.
 
-| Check                                                                              | Result                                                          |
-| ---------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `jg auth --provider cloudflare --gateway-url <custom domain> --stdin`, `jg doctor` | Saved; `Jev connection verified through Cloudflare AI Gateway.` |
-| Same with `https://gateway.ai.cloudflare.com/v1/ACCOUNT/GATEWAY`                   | Saved; doctor verified                                          |
-| Doctor with an invalid token                                                       | Exit 1, connection check failed message                         |
-| Search over `apps` for the gateway URL auth flow                                   | Exit 0 in 5.6s; `cli/src/auth.ts` first with its declarations   |
+Live checks used the built development CLI with an isolated `XDG_CONFIG_HOME` and a
+token scoped to Account > AI Gateway Run only, against a gateway custom domain:
 
-A live check proves the route and authentication, not probability equality with
-other providers, solve quality or cost.
+| Check                                                               | Result                                                                     |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `jg auth --provider cloudflare --base-url <custom domain>/ --stdin` | Saved `{provider, baseURL, apiKey}` with the trailing slash removed        |
+| `jg doctor`                                                         | `Jev connection verified through Cloudflare AI Gateway (<custom domain>).` |
+| Search over `packages/core/src` for where the gateway header is set | Exit 0 in 2s; `evaluator.ts` first with `cloudflareTransport`'s source     |
+
+The first implementation (before the merge) was also verified live against
+`https://gateway.ai.cloudflare.com/v1/ACCOUNT/GATEWAY` and with an invalid token
+(exit 1, connection check failed). A live check proves the route and
+authentication, not probability equality with other providers, solve quality or
+cost.

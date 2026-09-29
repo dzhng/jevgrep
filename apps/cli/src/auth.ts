@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { isCancel, password, select, text } from "@clack/prompts";
 import {
+  cloudflareProviderId,
+  cloudflareProviderLabel,
   customProviderId,
   customProviderLabel,
   endpointFor,
@@ -30,7 +32,8 @@ function validateKey(raw: string): string {
 
 export type Credentials =
   | { provider: ProviderId; apiKey: string }
-  | { provider: typeof customProviderId; baseURL: string; model: string; apiKey: string };
+  | { provider: typeof customProviderId; baseURL: string; model: string; apiKey: string }
+  | { provider: typeof cloudflareProviderId; baseURL: string; apiKey: string };
 
 export type AuthOptions = {
   provider?: CredentialProvider;
@@ -47,6 +50,15 @@ function invalid(error: unknown) {
 function customEndpoint(options: AuthOptions): CustomEndpoint {
   try {
     return { baseURL: validateBaseURL(options.baseURL), model: validateModel(options.model) };
+  } catch (error) {
+    throw new CliError(invalid(error));
+  }
+}
+
+/** Validate and normalize a Cloudflare gateway URL the way the evaluator will use it. */
+function cloudflareGateway(baseURL: unknown): string {
+  try {
+    return endpointFor({ provider: cloudflareProviderId, baseURL: baseURL as string }).baseURL;
   } catch (error) {
     throw new CliError(invalid(error));
   }
@@ -102,6 +114,24 @@ async function promptEndpoint(signal: AbortSignal): Promise<CustomEndpoint> {
   return customEndpoint({ baseURL, model });
 }
 
+async function promptGateway(signal: AbortSignal): Promise<string> {
+  const baseURL = await text({
+    message: "Cloudflare AI Gateway URL",
+    placeholder: "https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY",
+    validate: (value) => {
+      try {
+        cloudflareGateway(value);
+      } catch (error) {
+        return invalid(error);
+      }
+    },
+    output: process.stdout,
+    signal,
+  });
+  if (isCancel(baseURL)) throw new DOMException("Interrupted", "AbortError");
+  return cloudflareGateway(baseURL);
+}
+
 async function save(credentials: Credentials, signal: AbortSignal) {
   const directory = configDirectory();
   signal.throwIfAborted();
@@ -132,15 +162,20 @@ export async function authenticate(options: AuthOptions, signal: AbortSignal) {
     if (options.provider === customProviderId) {
       const endpoint = customEndpoint(options);
       credentials = { provider: customProviderId, ...endpoint, apiKey: await readKey(signal) };
+    } else if (options.provider === cloudflareProviderId) {
+      const baseURL = cloudflareGateway(options.baseURL);
+      credentials = { provider: cloudflareProviderId, baseURL, apiKey: await readKey(signal) };
     } else {
       credentials = { provider: options.provider, apiKey: await readKey(signal) };
     }
   } else {
     if (!process.stdin.isTTY)
       throw new CliError(
-        `Use auth --provider ${[...Object.keys(providers), customProviderId].join(
-          "|",
-        )} --stdin to read a piped key.`,
+        `Use auth --provider ${[
+          ...Object.keys(providers),
+          cloudflareProviderId,
+          customProviderId,
+        ].join("|")} --stdin to read a piped key.`,
       );
     const selected = await select<CredentialProvider>({
       message: "Choose your Jev provider",
@@ -149,6 +184,7 @@ export async function authenticate(options: AuthOptions, signal: AbortSignal) {
           value,
           label: providers[value].label,
         })),
+        { value: cloudflareProviderId, label: cloudflareProviderLabel },
         { value: customProviderId, label: customProviderLabel },
       ],
       output: process.stdout,
@@ -161,6 +197,13 @@ export async function authenticate(options: AuthOptions, signal: AbortSignal) {
         provider: customProviderId,
         ...endpoint,
         apiKey: await readPassword("Paste the API key for that endpoint", signal),
+      };
+    } else if (selected === cloudflareProviderId) {
+      const baseURL = await promptGateway(signal);
+      credentials = {
+        provider: cloudflareProviderId,
+        baseURL,
+        apiKey: await readPassword("Paste your Cloudflare AI Gateway token", signal),
       };
     } else {
       credentials = {
@@ -194,6 +237,8 @@ export async function loadCredentials(): Promise<Credentials> {
         apiKey,
       };
     }
+    if (provider === cloudflareProviderId)
+      return { provider, baseURL: cloudflareGateway(credentials.baseURL), apiKey };
     return { provider, apiKey };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {

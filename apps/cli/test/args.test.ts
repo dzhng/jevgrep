@@ -164,3 +164,35 @@ test("exclude rejects odd trailing backslash runs but preserves escaped backslas
     }
   }
 });
+
+test("Cloudflare auth carries its gateway URL as --base-url and rejects --model", () => {
+  expect(
+    parseCommand([
+      "auth",
+      "--provider",
+      "cloudflare",
+      "--base-url",
+      "https://gateway.ai.cloudflare.com/v1/account/gateway",
+      "--stdin",
+    ]),
+  ).toEqual({
+    kind: "auth",
+    provider: "cloudflare",
+    baseURL: "https://gateway.ai.cloudflare.com/v1/account/gateway",
+  });
+  for (const args of [
+    ["auth", "--provider", "cloudflare", "--stdin"],
+    [
+      "auth",
+      "--provider",
+      "cloudflare",
+      "--base-url",
+      "https://ai.example.com",
+      "--model",
+      "typesafe/jev",
+      "--stdin",
+    ],
+    ["auth", "--provider", "cloudflare", "--base-url", "https://ai.example.com"],
+  ])
+    expect(() => parseCommand(args)).toThrow();
+});

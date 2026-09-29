@@ -43,6 +43,7 @@ testInDocker("interactive auth hides input and exits 130 on interruption", async
     for (const mode of [
       "save",
       "custom-save",
+      "cloudflare-save",
       "interrupt-provider",
       "interrupt-key",
       "cancel-provider",
@@ -74,12 +75,18 @@ try:
     wait_for(b"Choose your Jev provider")
     mode = sys.argv[2]
     if mode == "custom-save":
-        os.write(master, b"\\x1b[B\\x1b[B\\x1b[B\\x1b[B\\r")
+        os.write(master, b"\\x1b[B\\x1b[B\\x1b[B\\x1b[B\\x1b[B\\r")
         wait_for(b"Base URL")
         os.write(master, b"http://127.0.0.1:8080/v1\\r")
         wait_for(b"Model ID")
         os.write(master, b"gateway/jev-2\\r")
         wait_for(b"API key")
+        os.write(master, b"pty-fixture-secret\\r")
+    elif mode == "cloudflare-save":
+        os.write(master, b"\\x1b[B\\x1b[B\\x1b[B\\x1b[B\\r")
+        wait_for(b"Cloudflare AI Gateway URL")
+        os.write(master, b"https://gateway.ai.cloudflare.com/v1/pty-account/pty-gateway/\\r")
+        wait_for(b"token")
         os.write(master, b"pty-fixture-secret\\r")
     else:
         if not mode.endswith("provider"):
@@ -113,7 +120,7 @@ finally:
         { env: { ...process.env, HOME: home, XDG_CONFIG_HOME: home } },
       );
       const result = JSON.parse(stdout);
-      const saved = mode === "save" || mode === "custom-save";
+      const saved = mode.endsWith("save");
       expect(result.code).toBe(saved ? 0 : 130);
       expect(result.stderr).toBe("");
       expect(result.stdout + result.echo).not.toContain("pty-fixture-secret");
@@ -135,6 +142,16 @@ finally:
           apiKey: "pty-fixture-secret",
         });
         expect(result.stdout).toContain("Custom endpoint (127.0.0.1:8080)");
+      } else if (mode === "cloudflare-save") {
+        expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+          provider: "cloudflare",
+          baseURL: "https://gateway.ai.cloudflare.com/v1/pty-account/pty-gateway",
+          apiKey: "pty-fixture-secret",
+        });
+        expect(result.stdout).toContain("Cloudflare AI Gateway (gateway.ai.cloudflare.com)");
+        expect(result.stdout.indexOf("OpenCode Zen")).toBeLessThan(
+          result.stdout.indexOf("Cloudflare AI Gateway"),
+        );
       } else expect(await readFile(file, "utf8")).toBe(previous);
       expect(await readdir(join(home, "jevgrep"))).toEqual(["credentials.json"]);
     }
