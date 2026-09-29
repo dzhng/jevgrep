@@ -1,7 +1,7 @@
 import { expect } from "bun:test";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { testInDocker, withCli } from "./cli";
+import { posix, testInDocker, withCli } from "./cli";
 
 testInDocker("installed auth saves privately, bounds stdin, and never echoes keys", async () => {
   await withCli(async ({ home, run }) => {
@@ -15,8 +15,10 @@ testInDocker("installed auth saves privately, bounds stdin, and never echoes key
       provider: "vercel",
       apiKey: "test-gateway-secret",
     });
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
-    expect((await stat(join(home, "jevgrep"))).mode & 0o777).toBe(0o700);
+    if (posix) {
+      expect((await stat(file)).mode & 0o777).toBe(0o600);
+      expect((await stat(join(home, "jevgrep"))).mode & 0o777).toBe(0o700);
+    }
     const whitespace = await run(["auth", "--provider", "vercel", "--stdin"], "two secrets\n");
     expect(whitespace.code).toBe(1);
     expect(whitespace.stderr).toBe("");
@@ -77,8 +79,10 @@ testInDocker(
           model: "gateway/jev-2",
           apiKey: key,
         });
-        expect((await stat(file)).mode & 0o777).toBe(0o600);
-        expect((await stat(join(home, "jevgrep"))).mode & 0o777).toBe(0o700);
+        if (posix) {
+          expect((await stat(file)).mode & 0o777).toBe(0o600);
+          expect((await stat(join(home, "jevgrep"))).mode & 0o777).toBe(0o700);
+        }
         expect(requests).toHaveLength(0);
 
         const doctor = await run(["doctor"]);
