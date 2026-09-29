@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants, type BigIntStats, type Dir } from "node:fs";
 import { lstat, open, opendir, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import ignore, { type Ignore } from "ignore";
+import { storageDirectory } from "./storage";
 
 /** These independent switches broaden only their named exclusion category. */
 export type FilesystemPolicy = {
@@ -142,30 +142,16 @@ export async function createFilesystem(options: FilesystemOptions) {
       throw new Error(`Invalid filesystem limit: ${name}`);
   }
   const protectedPaths = await Promise.all(
-    [
-      join(
-        process.env.XDG_CONFIG_HOME ||
-          (process.platform === "win32"
-            ? process.env.APPDATA || join(homedir(), "AppData", "Roaming")
-            : join(homedir(), ".config")),
-        "jevgrep",
-      ),
-      join(
-        process.env.XDG_CACHE_HOME ||
-          (process.platform === "win32"
-            ? process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local")
-            : join(homedir(), ".cache")),
-        "jevgrep",
-      ),
-      ...(options.protectedPaths ?? []),
-    ].map(async (path) => {
-      const absolute = resolve(path);
-      try {
-        return await realpath(absolute);
-      } catch {
-        return absolute;
-      }
-    }),
+    [storageDirectory("config"), storageDirectory("cache"), ...(options.protectedPaths ?? [])].map(
+      async (path) => {
+        const absolute = resolve(path);
+        try {
+          return await realpath(absolute);
+        } catch {
+          return absolute;
+        }
+      },
+    ),
   );
   const cursors = new Map<string, Cursor>();
   let closed = false;

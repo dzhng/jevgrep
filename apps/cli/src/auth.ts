@@ -1,5 +1,4 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { isCancel, password, select, text } from "@clack/prompts";
@@ -14,16 +13,11 @@ import {
   type CredentialProvider,
   type ProviderId,
 } from "@repo/core/providers";
+import { storageDirectory } from "@repo/core/storage";
 import { CliError } from "./errors";
 
 export function configDirectory() {
-  return join(
-    process.env.XDG_CONFIG_HOME ||
-      (process.platform === "win32"
-        ? process.env.APPDATA || join(homedir(), "AppData", "Roaming")
-        : join(homedir(), ".config")),
-    "jevgrep",
-  );
+  return storageDirectory("config");
 }
 
 function validateKey(raw: string): string {

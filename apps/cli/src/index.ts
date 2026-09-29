@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import { authenticate, configDirectory, loadCredentials } from "./auth";
 import { endpointFor } from "@repo/core/providers";
+import { storageDirectory } from "@repo/core/storage";
 import { help, parseCommand } from "./args";
 import { CliError } from "./errors";
 import { renderInventory, renderResult } from "./render";
 import { stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { version } from "../package.json";
 import { installSkill } from "./skill";
 
@@ -34,13 +33,7 @@ async function write(text: string) {
 }
 
 function cacheDirectory() {
-  return join(
-    process.env.XDG_CACHE_HOME ||
-      (process.platform === "win32"
-        ? process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local")
-        : join(homedir(), ".cache")),
-    "jevgrep",
-  );
+  return storageDirectory("cache");
 }
 
 async function main() {
