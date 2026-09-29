@@ -4,7 +4,7 @@ import { expect } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { testIfDocker } from "./helpers/docker";
+import { testIfDocker, testIfDockerPosix } from "./helpers/docker";
 import { retrieve } from "../packages/core/src/retrieve";
 import { createEvaluator, EvaluationFailure } from "../packages/core/src/evaluator";
 
@@ -318,7 +318,7 @@ testIfDocker(
   120_000,
 );
 
-testIfDocker(
+testIfDockerPosix(
   "unavailable directory previews are skipped rather than classified as empty metadata",
   async () => {
     const root = await mkdtemp(join(tmpdir(), "jg-preview-unavailable-"));

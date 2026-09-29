@@ -1,4 +1,4 @@
-import { testIfDocker as test } from "../../../test/helpers/docker";
+import { posix, testIfDocker as test } from "../../../test/helpers/docker";
 import { afterEach, expect } from "bun:test";
 import {
   mkdtemp,
@@ -53,8 +53,10 @@ test("exact requests reuse numeric answers without persisting source or credenti
   expect(saved).not.toContain("SOURCE_SENTINEL");
   expect(saved).not.toContain("source.ts");
   expect(saved).not.toContain("API_KEY_SENTINEL");
-  expect((await stat(join(dir, "entries", names[0]!))).mode & 0o777).toBe(0o600);
-  expect((await stat(dir)).mode & 0o777).toBe(0o700);
+  if (posix) {
+    expect((await stat(join(dir, "entries", names[0]!))).mode & 0o777).toBe(0o600);
+    expect((await stat(dir)).mode & 0o777).toBe(0o700);
+  }
   expect(cache.stats()).toEqual({ hits: 1, misses: 1, issues: [] });
 });
 
@@ -127,15 +129,17 @@ test("corrupt, incompatible and unreadable entries degrade to counted misses", a
     expect(await cache.get(input)).toBeUndefined();
   }
   await cache.put(input, { question1: 0.2 });
-  await chmod(file, 0);
-  try {
-    expect(await cache.get(input)).toBeUndefined();
-  } finally {
-    await chmod(file, 0o600);
+  if (posix) {
+    await chmod(file, 0);
+    try {
+      expect(await cache.get(input)).toBeUndefined();
+    } finally {
+      await chmod(file, 0o600);
+    }
   }
   expect(cache.stats().issues).toEqual([
     { kind: "cache_corrupt", count: 3 },
-    { kind: "cache_unavailable", count: 1 },
+    ...(posix ? [{ kind: "cache_unavailable", count: 1 }] : []),
   ]);
   expect(await cache.get(input)).toEqual({ question1: 0.2 });
 });
