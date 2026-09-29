@@ -55,6 +55,14 @@ first, so it can legitimately produce a differently ordered later request. Sorti
 that source by filename would introduce a different input to Jev, the relevance
 classifier, even if every source byte were retained.
 
+Navigation has the same property one level up. A directory level can span several
+concurrent navigation requests, and its decisions determine the next level's
+items, pruned directories and relationship seeds, which are then regrouped into
+new requests. Decisions are therefore used in item order, not in the order their
+requests completed. With in-order responses this matches the earlier behavior;
+in a probe with 240 directories, five completion orders previously produced five
+different sets of later navigation requests and now produce one.
+
 The reference fixture controls which source is selected so its comparison is
 stable. It may sort independent whole HTTP requests before comparing them, but
 never sorts the ordered questions or evidence inside a request:

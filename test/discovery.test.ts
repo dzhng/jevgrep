@@ -211,7 +211,7 @@ testIfDocker(
 );
 
 testIfDocker(
-  "relationship discovery follows controlled provider completion order",
+  "relationship discovery does not depend on provider completion order",
   async () => {
     const root = await mkdtemp(join(tmpdir(), "jg-completion-order-"));
     try {
@@ -224,15 +224,20 @@ testIfDocker(
         for (let i = 0; i < 30; i++)
           await writeFile(join(root, dir, `f${i}.txt`), '\"'.repeat(2000));
       }
-      const actual = await trajectory(root, true);
-      const descendant = actual.find((body) =>
-        body.state.items?.[0]?.path.startsWith("src/relatedZ/"),
-      );
-      expect(descendant).toBeDefined();
-      const firstDescendant = actual.find(
+      const navigation = (requests: Body[]) =>
+        requests.filter((body) => body.state.items).map((body) => JSON.stringify(body));
+      const inOrder = await trajectory(root);
+      // The later relationship branch answers first, as an asynchronous provider can.
+      const reversed = await trajectory(root, true);
+      expect(navigation(reversed)).toEqual(navigation(inOrder));
+      const descendants = reversed.filter(
         (body) => body.state.relationAnchor && body.state.items?.[0]?.kind === "file",
       );
-      expect(firstDescendant?.state.items?.[0]?.path.startsWith("src/relatedZ/")).toBe(true);
+      expect(descendants.map((body) => body.state.items![0]!.path.split("/")[1])).toContain(
+        "relatedZ",
+      );
+      // Relationship seeds follow their directory order.
+      expect(descendants[0]?.state.items?.[0]?.path.startsWith("src/relatedA/")).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

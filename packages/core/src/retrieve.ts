@@ -151,7 +151,11 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       }
       pump();
     });
-    return results;
+    // Decisions return in item order, not batch completion order: the next level, pruned
+    // directories and relationship seeds are built from this order, and their batches are
+    // requests with cache keys.
+    const position = new Map(items.map((item, index) => [item, index]));
+    return results.sort((a, b) => position.get(a.item)! - position.get(b.item)!);
   }
   async function previewDirectory(path: string): Promise<DirectoryPreview | undefined> {
     const preview: DirectoryPreview = {
