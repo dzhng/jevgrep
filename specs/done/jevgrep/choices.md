@@ -66,7 +66,7 @@ concurrent navigation requests, and its decisions determine the next level's
 items, pruned directories and relationship seeds, which are then regrouped into
 new requests. Decisions are therefore used in item order, not in the order their
 requests completed. With in-order responses this matches the earlier behavior;
-in a probe with 240 directories, five completion orders previously produced five
+in a probe with 240 directories, five completion orders previously produced four
 different sets of later navigation requests and now produce one.
 
 The reference fixture controls which source is selected so its comparison is
@@ -186,7 +186,7 @@ Owner: [cache](../../../packages/core/src/cache.ts).
 
 Retrieval checks the same files many times: before each declaration group, before
 each provider attempt and for every cross-file donor. Each check used to reread
-and rehash the whole file; a 58-file search performed 985 full reads, and the
+and rehash the whole file; a 58-file search performed 491 full reads, and the
 serialized validation queue delayed requests behind them. The reader now keeps
 its earlier snapshot while the file's identity matches: device, inode, size and
 both modification and change times, confirmed by opening the file without
