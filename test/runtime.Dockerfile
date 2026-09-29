@@ -11,7 +11,7 @@ COPY packages/typescript-config packages/typescript-config
 RUN bun install --frozen-lockfile
 COPY apps/cli apps/cli
 COPY packages/core packages/core
-COPY scripts/build-cli.ts scripts/package-notices.mjs scripts/
+COPY scripts/build-cli.ts scripts/package-notices.mjs scripts/parser-assets.mjs scripts/
 COPY scripts/licenses scripts/licenses
 COPY LICENSE LICENSE
 COPY skills skills

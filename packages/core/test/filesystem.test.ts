@@ -155,6 +155,69 @@ test("policy overrides are independent and never admit protected storage or bina
   }
 });
 
+test("pages count skipped entries by reason and report file sizes", async () => {
+  const root = await fixture({
+    ".gitignore": "ignored.txt\n",
+    "ignored.txt": "ignored",
+    "node_modules/pkg.js": "dependency",
+    ".env": "secret",
+    "sized.ts": "12345",
+    "dir/inner.ts": "x",
+  });
+  const reader = await createFilesystem({ root });
+  try {
+    const page = await reader.listPage();
+    expect(page.entries.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
+      { path: "dir", kind: "directory" },
+      { path: "sized.ts", kind: "file", bytes: 5 },
+    ]);
+    expect(page.excluded).toEqual({ hidden: 2, ignored: 1, dependency: 1 });
+  } finally {
+    await reader.close();
+  }
+});
+
+test("exclude patterns only narrow eligibility, even with --no-ignore and repository negations", async () => {
+  const root = await fixture({
+    ".gitignore": "!keep.test.ts\n",
+    "src/app.ts": "application",
+    "src/app.test.ts": "test",
+    "keep.test.ts": "repository negation",
+    "admin/page.ts": "admin",
+    "admin/nested/deep.ts": "nested admin",
+    "docs/guide.md": "guide",
+  });
+  const reader = await createFilesystem({ root, policy: { exclude: ["*.test.ts", "admin/"] } });
+  try {
+    for (const path of ["src/app.ts", "docs/guide.md"])
+      expect(await reader.readSnapshot(path)).toMatchObject({ status: "ok" });
+    for (const path of ["src/app.test.ts", "keep.test.ts", "admin/page.ts", "admin/nested/deep.ts"])
+      expect(await reader.readSnapshot(path)).toMatchObject({
+        status: "excluded",
+        reason: "exclude_pattern",
+      });
+    expect((await reader.listPage()).entries.map((entry) => entry.path).sort()).toEqual([
+      "docs",
+      "src",
+    ]);
+  } finally {
+    await reader.close();
+  }
+  const unignored = await createFilesystem({
+    root,
+    policy: { noIgnore: true, exclude: ["docs/**"] },
+  });
+  try {
+    expect(await unignored.readSnapshot("docs/guide.md")).toMatchObject({
+      status: "excluded",
+      reason: "exclude_pattern",
+    });
+    expect(await unignored.readSnapshot("src/app.test.ts")).toMatchObject({ status: "ok" });
+  } finally {
+    await unignored.close();
+  }
+});
+
 test("root normalization does not follow descendant links or special files and permission errors stay issues", async () => {
   const root = await fixture({ visible: "ok", unreadable: "unreadable sentinel" });
   const outside = await fixture({ outside: "OUTSIDE_SENTINEL" });
@@ -272,6 +335,46 @@ test("limits and directory changes are visible issues, and fresh queries observe
   }
 });
 
+test("one reader observes same-size ignore edits with restored timestamps and recreated rules", async () => {
+  const root = await fixture({ ".ignore": "a.txt\n", "a.txt": "a", "b.txt": "b" });
+  const rules = join(root, ".ignore");
+  const stamp = new Date("2020-01-01T00:00:00Z");
+  await utimes(rules, stamp, stamp);
+  const reader = await createFilesystem({ root });
+  try {
+    expect(await reader.readSnapshot("a.txt")).toMatchObject({
+      status: "excluded",
+      reason: "ignored",
+    });
+    expect(await reader.readSnapshot("b.txt")).toMatchObject({
+      status: "ok",
+      snapshot: { source: "b" },
+    });
+    await writeFile(rules, "b.txt\n");
+    await utimes(rules, stamp, stamp);
+    expect(await reader.readSnapshot("a.txt")).toMatchObject({
+      status: "ok",
+      snapshot: { source: "a" },
+    });
+    expect(await reader.readSnapshot("b.txt")).toMatchObject({
+      status: "excluded",
+      reason: "ignored",
+    });
+    await rm(rules);
+    expect(await reader.readSnapshot("b.txt")).toMatchObject({
+      status: "ok",
+      snapshot: { source: "b" },
+    });
+    await writeFile(rules, "a.txt\n");
+    expect(await reader.readSnapshot("a.txt")).toMatchObject({
+      status: "excluded",
+      reason: "ignored",
+    });
+  } finally {
+    await reader.close();
+  }
+});
+
 test("protected storage remains excluded when explicit root resolves through its alias", async () => {
   const store = await fixture({ credential: "NEVER_UPLOAD" });
   const root = await fixture({});
@@ -319,6 +422,12 @@ test("valid UTF-8 control-byte binary and invalid UTF-8 remain excluded under ev
     control: new Uint8Array([1, 2, 3]),
     invalid: new Uint8Array([255]),
     plain: "one\ttwo\r\nthree\f",
+    unicode: "雪 café 😀",
+    ...Object.fromEntries(
+      [...Array.from({ length: 32 }, (_, code) => code), 127]
+        .filter((code) => ![9, 10, 12, 13].includes(code))
+        .map((code) => [`control-${code}`, new Uint8Array([65, code, 66])]),
+    ),
   });
   const reader = await createFilesystem({
     root,
@@ -328,6 +437,17 @@ test("valid UTF-8 control-byte binary and invalid UTF-8 remain excluded under ev
     expect(await reader.readSnapshot("control")).toMatchObject({
       status: "excluded",
       reason: "binary",
+    });
+    for (const code of [...Array.from({ length: 32 }, (_, code) => code), 127]) {
+      if ([9, 10, 12, 13].includes(code)) continue;
+      expect(await reader.readSnapshot(`control-${code}`)).toMatchObject({
+        status: "excluded",
+        reason: "binary",
+      });
+    }
+    expect(await reader.readSnapshot("unicode")).toMatchObject({
+      status: "ok",
+      snapshot: { source: "雪 café 😀" },
     });
     expect(await reader.readSnapshot("invalid")).toMatchObject({
       status: "excluded",

@@ -13,6 +13,7 @@ export type FileEvidence = {
   path: string;
   contentHash: string;
   score: number;
+  priority?: number;
   roles: string[];
   leads: ReadingLead[];
   selected: EvidenceRange[];
@@ -24,6 +25,11 @@ export type FileEvidence = {
     sourceByteEnd?: number;
     partial?: boolean;
   }>;
+  presentationExcerpts?: FileEvidence["excerpts"];
+  selectedPresentationExcerpts?: FileEvidence["excerpts"];
+  presentationSelected?: EvidenceRange[];
+  sourceDecisions?: Array<{ range: EvidenceRange; score: number }>;
+  callLeads?: Array<{ caller: string; name: string; range: Range; unknownEarlierBases: string[] }>;
   sourceOmitted: boolean;
 };
 export type RetrievalResult = {
@@ -32,11 +38,11 @@ export type RetrievalResult = {
   status: "complete" | "incomplete" | "interrupted";
   files: FileEvidence[];
   issues: Array<{ kind: string; count: number }>;
+  providerFailure?: string;
   warnings?: Array<{ kind: string; count: number }>;
   repositoryContext: {
     instructionFiles: string[];
     instructionLookupIncomplete: boolean;
-    pytestFiles: string[];
   };
   counts: { requests: number; cacheHits: number; inspectedFiles: number };
 };
@@ -51,6 +57,7 @@ export type Evaluator = {
   readonly requests: number;
   readonly cacheHits?: number;
   readonly cacheIssues?: Array<{ kind: string; count: number }>;
+  /** Validate sources before each transport attempt and before returning a cached answer. */
   evaluate(
     request: EvaluationRequest,
     policy?: { navigation?: boolean; beforeAttempt?: () => Promise<void> },

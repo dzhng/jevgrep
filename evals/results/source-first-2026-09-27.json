@@ -1,0 +1,155 @@
+{
+  "candidate": "source-first-v1",
+  "package_sha256": "4b4875ae4b6308423936be278878ef3315261bfdd67081883728509b3e916d28",
+  "results": [
+    {
+      "study": "source-first-django-pilot",
+      "task": "django__django-15629",
+      "official_resolved": true,
+      "sol_cost_usd": 0.995299,
+      "all_requests_accounted": true,
+      "fixed_no_jev_baseline_cost_usd": 1.5055472,
+      "jev_known_metadata_subtotal_usd": 0.489485052,
+      "jev_cost_complete": false
+    },
+    {
+      "study": "source-first-scikit-pilot",
+      "task": "scikit-learn__scikit-learn-13124",
+      "official_resolved": true,
+      "sol_cost_usd": 0.2889218,
+      "all_requests_accounted": true,
+      "fixed_no_jev_baseline_cost_usd": 0.29443600000000003,
+      "jev_known_metadata_subtotal_usd": 0.06056274,
+      "jev_cost_complete": false
+    },
+    {
+      "study": "source-first-pytest-pilot",
+      "task": "pytest-dev__pytest-6197",
+      "official_resolved": true,
+      "sol_cost_usd": 0.5838677999999999,
+      "all_requests_accounted": true,
+      "fixed_no_jev_baseline_cost_usd": 2.344458,
+      "jev_known_metadata_subtotal_usd": 0.173283852,
+      "jev_cost_complete": false
+    },
+    {
+      "study": "source-first-requests-pilot",
+      "task": "psf__requests-1142",
+      "official_resolved": true,
+      "sol_cost_usd": 0.2325528,
+      "all_requests_accounted": true,
+      "fixed_no_jev_baseline_cost_usd": 0.2685004,
+      "jev_known_metadata_subtotal_usd": 0.013229916,
+      "jev_cost_complete": true
+    },
+    {
+      "study": "source-first-astropy-pilot",
+      "task": "astropy__astropy-13579",
+      "official_resolved": true,
+      "sol_cost_usd": 0.5225402,
+      "all_requests_accounted": true,
+      "fixed_no_jev_baseline_cost_usd": 0.428631,
+      "jev_known_metadata_subtotal_usd": 0.027907152,
+      "jev_cost_complete": true
+    },
+    {
+      "study": "source-first-xarray-pilot",
+      "task": "pydata__xarray-3305",
+      "official_resolved": true,
+      "sol_cost_usd": 0.4155592,
+      "all_requests_accounted": true,
+      "fixed_no_jev_baseline_cost_usd": 0.4937066,
+      "jev_known_metadata_subtotal_usd": 0.229570278,
+      "jev_cost_complete": false
+    },
+    {
+      "study": "source-first-sympy-pilot",
+      "task": "sympy__sympy-16792",
+      "official_resolved": true,
+      "sol_cost_usd": 0.6136062,
+      "all_requests_accounted": true,
+      "fixed_no_jev_baseline_cost_usd": 0.547975,
+      "jev_known_metadata_subtotal_usd": 0.1994937,
+      "jev_cost_complete": false
+    },
+    {
+      "study": "source-first-sphinx-pilot",
+      "task": "sphinx-doc__sphinx-8638",
+      "official_resolved": true,
+      "sol_cost_usd": 0.7348094,
+      "all_requests_accounted": true,
+      "fixed_no_jev_baseline_cost_usd": 1.0594724,
+      "jev_known_metadata_subtotal_usd": 0.172991868,
+      "jev_cost_complete": false
+    },
+    {
+      "study": "source-first-matplotlib-pilot",
+      "task": "matplotlib__matplotlib-26466",
+      "official_resolved": false,
+      "official_grade_receipt": "grading-retry-1-receipt.json",
+      "sol_cost_usd": 0.3618732,
+      "all_requests_accounted": true,
+      "fixed_no_jev_baseline_cost_usd": 0.395716,
+      "jev_known_metadata_subtotal_usd": 0.425578608,
+      "jev_cost_complete": false
+    },
+    {
+      "study": "source-first-pylint-pilot",
+      "task": "pylint-dev__pylint-4604",
+      "official_resolved": false,
+      "sol_cost_usd": 0.317418,
+      "all_requests_accounted": true,
+      "fixed_no_jev_baseline_cost_usd": 0.2836264,
+      "caveat": "Official test collection failed: IS_PYPY import missing; same known baseline limitation. Not a demonstrated behavioral regression.",
+      "jev_known_metadata_subtotal_usd": 0.084296772,
+      "jev_cost_complete": true
+    }
+  ],
+  "official_passes": 8,
+  "sol_cost_usd": 5.0664476,
+  "fixed_no_jev_baseline_cost_usd": 7.622069,
+  "scope": "Completed ten-task development cohort, one frozen package and original public skill. Eight official solves, same eight saved no-Jev solves. Historical published runtime solved seven. Separate product/skill trials are not pooled.",
+  "jev_known_metadata_subtotal_usd": 1.876399938,
+  "public_skill_sha256": "a52c35c612052188791a1e3d8e068bf633382247c5fffaceea55056001fff748",
+  "model": "openai/gpt-5.6-sol",
+  "effort": "medium",
+  "codex_cli": "0.153.4",
+  "jev_cost_in_scored_metric": false,
+  "jev_full_cost_known": false,
+  "no_jev_official_solves": 8,
+  "historical_published_runtime": {
+    "official_solves": 7,
+    "tasks": 10,
+    "sol_cost_usd": 4.5195532,
+    "artifact_note": "Earlier corrected runtime, not a fresh full-cohort measurement of npm0.3.2."
+  },
+  "product_django_trials": [
+    {
+      "candidate": "npm0.3.2",
+      "official_resolved": false,
+      "sol_cost_usd": 0.996692
+    },
+    {
+      "candidate": "integrated CLI, original skill",
+      "official_resolved": false,
+      "sol_cost_usd": 0.8742672
+    },
+    {
+      "candidate": "integrated CLI, independent-condition public skill",
+      "official_resolved": true,
+      "sol_cost_usd": 1.1036896,
+      "package_sha256": "0ba711be10e5d692e8265e43b2e4b35ca4147ac895d1bf11cff0faf072ae16ad",
+      "adopted": false,
+      "reason": "General debugging instruction outside retrieval skill scope; reverted."
+    },
+    {
+      "candidate": "integrated CLI, neutral public skill",
+      "official_resolved": false,
+      "sol_cost_usd": null,
+      "known_sol_cost_usd": 0.9579102,
+      "unknown_requests": 1,
+      "package_sha256": "c27f1a1298f9f8f159f1782ccfa2680ba6d2a152038049be53d7e2cd8d522708",
+      "skill_sha256": "04d4d7b59d122799a863bc399234de171bdb087436075be52ebf3bece1bf3e44"
+    }
+  ]
+}

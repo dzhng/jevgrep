@@ -1,16 +1,17 @@
 # Saved-provider support
 
-Jevgrep supports Vercel AI Gateway, native TypeSafe and OpenRouter through one
-TypeSafe-compatible AI SDK adapter. The implementation landed in `9496540` after
-the protocol checkpoint `06daef9`; it has not been published to npm.
+Jevgrep routes its [saved providers](../../../packages/core/src/providers.ts) through
+one TypeSafe-compatible AI SDK adapter. Provider selection changes transport while
+keeping retrieval behavior fixed.
 
 ## Why selection belongs in auth
 
 Coding agents should research code without managing provider routing. A human
 chooses a provider and key during `jg auth`, and ordinary search and doctor use
 that saved record until auth replaces it. This avoids ambiguous environment-key
-precedence and accidental provider fallback. Automation has one explicit path:
-`jg auth --provider NAME --stdin`.
+precedence and accidental provider fallback. Custom endpoints keep their base URL
+and model in that same saved record; see the [CLI guide](../../../apps/cli/README.md)
+for setup and gateway protocol requirements.
 
 The only compatibility exception is deliberate: a saved key without a provider
 still means Vercel. Reading it does not migrate or rewrite the file. Environment
@@ -25,6 +26,12 @@ This is a simpler setup contract, not a multi-account credential registry.
 - The application owns actual HTTP attempts, retries, shared rate-limit cooldown
   and cancellation. SDK retries remain disabled. The 50,000-attempt guard protects
   against runaway work; it is not an optimization budget.
+- TypeSafe throughput is paced by estimated input tokens and request starts,
+  independently of the concurrent-request ceiling. Reservations use conservative
+  payload bytes until reported usage is available. Queue waits happen before the
+  network timeout and source is revalidated after waiting. These budgets belong
+  to one search; other processes sharing the account can still cause rate limits,
+  so provider cooldowns remain authoritative.
 - Source freshness is checked before attempts and cached evidence use. An invalid
   provider answer is failure or incomplete discovery, never negative evidence.
 - Exact answer-cache identity separates provider, endpoint, model and protocol,
@@ -33,16 +40,15 @@ This is a simpler setup contract, not a multi-account credential registry.
 - Auth saves one private record atomically and never verifies a key over the
   network. Doctor checks separately with synthetic source. Keys never belong in
   chat or CLI output.
-- Tests route requests outside the product. There is no public endpoint/model
-  override or provider flag on search/doctor, and no automatic fallback.
+- Tests can route requests to fixtures without modifying saved production routing.
+  Custom endpoints are selected through auth; search and doctor have no routing
+  overrides or automatic fallback.
 
 The [preset owner](../../../packages/core/src/providers.ts),
 [evaluator](../../../packages/core/src/evaluator.ts), and
 [auth module](../../../apps/cli/src/auth.ts) hold the current mechanics.
-[Provider replay](../../../test/reference/provider-parity.test.ts) pins semantic
-requests and complete stdout; [installed journeys](../../../test/installed.test.mjs)
-exercise the packed product. The [preservation contract](parity.md) maps the other
-invariants to their checks. [Research](research.md) records the documented routes,
+[Provider behavior tests](../../../test/evaluator.test.ts) cover evaluation semantics; [installed journeys](../../../test/installed.test.mjs)
+exercise the packed product. The [historical preservation contract](parity.md) records the retired port checks. [Research](research.md) records the documented routes,
 model choices, pinned SDK and immutable inputs rather than relying on memory.
 
 ## What the implementation taught us

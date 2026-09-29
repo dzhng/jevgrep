@@ -55,19 +55,19 @@ The retained winning executable is
 `evals/runs/swebench/auto-research-80/unit-locators.mjs`, SHA-256
 `9112edb080f87b1961780dd144b0c951a2e6728c8dce574452251c30acae996b`.
 The source closure and accepted skill are pinned by
-[`test/reference/manifest.json`](../../../../test/reference/manifest.json).
+[`test/reference/manifest.json`](https://github.com/dzhng/jevgrep/blob/80a216bfa0bf04b2ec615ede81f7af32f1c14153/test/reference/manifest.json).
 The executable embeds AI SDK 7.0.107 and TypeScript 5.9.3; the port pins the same
 versions. Requests' retained benchmark image used Python 3.11.5, while the
 deterministic reference container uses Python 3.11.2.
 
 | Reference behavior | Evidence through the port | Owning gate |
 | --- | --- | --- |
-| Discovery previews, whole-frontier grouping, insertion order, relationship sampling and role inputs | [HTTP discovery comparisons](../../../../test/reference/discovery-parity.test.ts), including controlled response completion | 04/07: exact computed native requests |
-| Original positives plus bounded second context expansion, source fragments and reading leads | [Frozen selection comparisons](../../../../test/reference/selection.test.ts); real Requests controlled selection reproduces all six accepted ranges and 4,761 source bytes | 02/04: request and range parity |
-| Numbered source, scoped instruction lookup and test suggestions | [Full production HTTP replay](../../../../test/reference/replay.test.ts) and [context-consumer comparisons](../../../../test/reference/repository-context-parity.test.ts) compare complete stdout and requests | 04/07: whole packet parity |
-| Navigation split recovery and provider failure behavior | Discovery comparisons plus [socket disconnect comparison](../../../../test/reference/disconnect.test.ts) | 05: matched recovery trajectories |
-| Accepted agent instructions and task prompt | [Exact skill comparison](../../../../test/reference/skill.test.ts), installed harness prompt assertion | 04/08: only executable rename; unchanged baseline task |
-| Python parser fallback and TypeScript comment expansion | [Parser conformance](../../../../test/parser/source.test.ts), [whole-CLI Python comparisons](../../../../test/reference/python-parity.test.ts) and context-consumer comparisons | 02: reference-version behavior for exercised syntax |
+| Discovery previews, whole-frontier grouping, insertion order, relationship sampling and role inputs | [HTTP discovery comparisons](https://github.com/dzhng/jevgrep/blob/80a216bfa0bf04b2ec615ede81f7af32f1c14153/test/reference/discovery-parity.test.ts), including controlled response completion | 04/07: exact computed native requests |
+| Original positives plus bounded second context expansion, source fragments and reading leads | [Frozen selection comparisons](https://github.com/dzhng/jevgrep/blob/80a216bfa0bf04b2ec615ede81f7af32f1c14153/test/reference/selection.test.ts); real Requests controlled selection reproduces all six accepted ranges and 4,761 source bytes | 02/04: request and range parity |
+| Numbered source, scoped instruction lookup and test suggestions | Historical production HTTP replay and context-consumer comparisons (retired; current checks live under `test/`) compare complete stdout and requests | 04/07: whole packet parity |
+| Navigation split recovery and provider failure behavior | Discovery comparisons plus [socket disconnect comparison](https://github.com/dzhng/jevgrep/blob/80a216bfa0bf04b2ec615ede81f7af32f1c14153/test/reference/disconnect.test.ts) | 05: matched recovery trajectories |
+| Accepted agent instructions and task prompt | [Exact skill comparison](https://github.com/dzhng/jevgrep/blob/80a216bfa0bf04b2ec615ede81f7af32f1c14153/test/reference/skill.test.ts), installed harness prompt assertion | 04/08: only executable rename; unchanged baseline task |
+| Python parser fallback and TypeScript comment expansion | [Parser conformance](../../../../test/parser/source.test.ts), [whole-CLI Python comparisons](https://github.com/dzhng/jevgrep/blob/80a216bfa0bf04b2ec615ede81f7af32f1c14153/test/reference/python-parity.test.ts) and context-consumer comparisons | 02: reference-version behavior for exercised syntax |
 
 The actual saved executable passed the 15 HTTP replay, discovery and disconnect
 tests with the restored port. This is evidence for those exercised fixtures;

@@ -1,36 +1,45 @@
-# Spike acceptance: quality and agent cost
+# Product evaluation: task completion and total cost
 
-The current objective is at least baseline official task solve rate and no greater
-coding-agent cost per attempted task, assessed with Codex Sol on matched SWE-bench tasks. Claude evaluation is deferred
-to full implementation. Keep spikes small and focused on architectural uncertainty. Report cost per official solve as an additional
-measure; it must not hide increased spend per attempted task. Seek improvements
-in both quality and cost, and report small-cohort uncertainty explicitly.
+Official SWE-bench task completion is the primary outcome. Compare a candidate
+with the preceding product version's saved benchmark evidence on matched tasks,
+and identify exactly which artifacts and protocols were measured. Report the
+full task cost (coding agent plus Jev) per attempted task alongside quality; increased cost may
+be an acceptable tradeoff for more completed tasks. Old spike cost-win counts,
+parity assertions and supplemental compatibility checks are not acceptance gates.
 
-Run a baseline only once per task, model, and harness. Reuse that fixed result
-for every retrieval or skill iteration; candidate changes do not justify another
-baseline. Retain the complete baseline traces, patch, official grade, and billing
-ledger for analysis. Preserve earlier duplicate attempts as historical evidence;
-do not select a different baseline after seeing a treatment result.
+Keep the same source, Sol model and harness for a comparison. Use the actual
+public skill packaged with the candidate. Retrieval experiments keep that skill
+fixed. The public skill teaches CLI usage only; do not tune it with general
+debugging advice or agent-specific workflow rules to improve benchmark scores.
+A change to its usage instructions is identified separately in comparisons. Required initial Jevgrep use and ordinary follow-up search remain part of
+the paired protocol. Timing is diagnostic, not an optimization target.
 
-Each matched Sol cohort has a frozen plan under [SWE-bench runs](runs/swebench/).
-Compare its complete set of attempts with the fixed baselines, retaining every
-task outcome. Report individual task costs alongside the cohort mean so savings
-on one task do not conceal regressions on another. Development pilots remain
-separate from prospective confirmations. The earlier Sphinx studies retain their
-original scope and baseline; do not pool them into this cohort.
+Run a baseline only once per task, model and harness. Reuse that fixed result;
+candidate changes do not justify another baseline run. Preserve its complete
+trace, patch, official grade and billing. Saved no-Jev baselines remain useful
+context, separately identified from the previous product's results.
 
-Elapsed time is diagnostic only during architecture spikes. A clock discontinuity
-or unrelated host workload does not by itself invalidate an official grade or
-fully reconciled agent bill. Actual execution failures, incomplete billing and
-grading infrastructure failures still require investigation and remain visible.
+Freeze each candidate within its cohort and retain every attempted outcome.
+Report individual task costs and cohort totals. Keep development pilots separate
+from confirmation runs; do not select favorable repetitions or combine the best
+result from different candidates for each task. Partial cohorts remain explicitly
+partial. An additional failure does not erase already verified solves.
 
-Jev tokens and cost are excluded. Source context delivered to the coding agent
-counts toward that agent’s cost. Include unsuccessful attempts in spending;
-unknown charges are unknown, never zero. Required initial Jevgrep use and ordinary
-follow-up search remain part of the paired protocol.
+Total scored task cost includes both coding-agent and Jev charges by default.
+Keep their cost components separate. Native TypeSafe usage is priced at the
+retained public model rate and clearly labelled as an estimate; Gateway metadata
+is reported cost, not an invoice. Jev tokens remain separate from coding-agent
+token totals. Retrieved source counts toward the coding agent's context cost. Include unsuccessful
+attempts; unknown charges are unknown, never zero. Preserve infrastructure failures
+and investigate them separately from product failures. Supplemental observations
+can explain behavior but do not rewrite official solve results.
 
-This policy supersedes the speed acceptance requirement in historical reports and
-the frozen [accounting policy](accounting.md). Their billing, retention and source
-isolation rules still apply. Frozen plans and raw evidence remain unchanged;
-protocol amendments identify where the revised criterion takes effect. Do not pool
-different candidates or select favorable repetitions to establish a winner.
+Architecture experiments and packaged-product runs must name their measured
+artifacts. Record port differences and verification separately from benchmark
+scores. A small, tuned Python cohort supports an observed comparison, not a claim
+of reliability across arbitrary repositories, languages or coding agents.
+
+This policy supersedes historical spike acceptance rules. Frozen plans, earlier
+verdicts and raw evidence retain the criteria used at the time; they are not
+rewritten to manufacture a new result. [Accounting](accounting.md) describes the
+retained billing evidence and source-isolation rules.

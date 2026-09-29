@@ -1,5 +1,9 @@
 # Preservation gates
 
+Historical provider-port evidence: the frozen-spike compatibility requirements
+below were retired in favor of [official task completion and cost](../../../evals/cost-quality-policy.md).
+They do not constrain current retrieval, skill wording or output formatting.
+
 The immutable input tree and historical hashes are identified in
 [research](research.md). Keep the original oracle executable, corpus, manifest,
 manifest-covered files and prior studies byte-for-byte unchanged. The production

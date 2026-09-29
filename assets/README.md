@@ -1,35 +1,34 @@
 # README artwork
 
-Generated with the built-in image generation tool for the public README.
-The cover illustrates discovery; it is not a literal file tree or CLI screenshot.
-The explainer's example code is illustrative. Its benchmark claim comes from the
-[retained repeat](../specs/done/jevgrep/assets/variance-repeat.md): 40.70% lower full
-Sol cost across ten tasks, including failures, excluding Jev; 7/10 solves versus
-8/10 baseline. The image rounds the reduction down to 40%. It does not claim
-unchanged quality, faster execution, or general savings.
+Both README images were updated with the built-in image-generation tool, retaining
+the original ivory, ink and vermilion visual style. They illustrate retrieval;
+the example code and file tree are illustrative.
 
-## Cover prompt
+The headline rounds the observed 28.6% cost reduction to **~30%**. Both arms
+solved 8/10 tasks; total Sol cost was $7.62 without Jevgrep and $5.44 with it.
+The [benchmark report](../evals/results/relevance-threshold-2026-09-27.md) owns the
+methodology, exact costs and limitations. Jev cost is excluded. These are observed
+results on a tuned ten-task Python subset, not a speed claim or a universal guarantee.
 
-Create a finished wide landscape GitHub README hero image for an open-source developer CLI called "jevgrep", executable "jg". Aspect ratio about 2.4:1. Editorial technical illustration, refined print-like graphic design, warm ivory background, near-black ink, vibrant vermilion and muted blue accents. Strong typographic hierarchy, generous whitespace. Left half large crisp title exactly "jevgrep", smaller subtitle exactly "Find the context. Start coding." and a small terminal pill exactly "jg". Right half an elegant illustrated branching file tree: many small paper/code cards, a few highlighted coral branches leading to a neat small stack of source excerpts. Communicate semantic research through source files, grounded and calm. Flat shapes with slight paper grain, precise thin connectors, no gradients, no robots, no generic AI sparkle, no photos, no fake UI or charts. All text spelled exactly as given. Keep safe margins and very legible at GitHub README width. This is a project header image, not a web page screenshot.
+## Final edit prompts
 
-### Final cover edit
+### cover
 
-Edit this Jevgrep README header while preserving its warm ivory/black/vermilion editorial style, large title, exact subtitle "Find the context. Start coding.", jg terminal pill, and wide composition. Simplify the right-hand file tree into elegant folder and document icons with code represented ONLY by abstract horizontal lines. Remove ALL tiny filename labels, all Rust code and .rs extensions, and replace the three rightmost source cards with clean abstract code lines (no words). Remove the bottom footer "SOURCE CODE × SEMANTIC SEARCH × FASTER PROGRESS" and the bottom-right italic extra tagline entirely. Do not add text. The ONLY text anywhere in the final image must be "jevgrep", "Find the context. Start coding.", and "jg". Keep the core idea: coral highlighted paths through a tree of folders and files flow into selected source cards. Avoid malformed connecting strokes; keep connectors crisp. Beautiful clear header at GitHub README width, no speed claims.
+Edit this wide README hero in its existing warm ivory, black serif, vermilion editorial style. Preserve the large "jevgrep" wordmark, jg terminal pill, and elegant highlighted folder tree flowing into source excerpt cards. Replace the subtitle "Find the context. Start coding." with exactly "Same solve rate. ~30% lower cost." Make this subtitle clearly legible and comfortably fit the left area. Add one small but readable footnote along bottom left exactly "10-task SWE-bench subset · Sol cost · Jev excluded". Keep abundant whitespace and crisp illustration. Only these text strings plus "jevgrep" and "jg" should appear. Wide landscape about 2.4:1. The ~ symbol must be present before 30% to indicate rounding. No speed claim.
 
-## Explainer prompt
+### explainer
 
-Create a finished landscape explainer graphic for the open-source developer CLI "jevgrep" / "jg", aspect ratio about 1.6:1. Match a premium editorial technical print aesthetic: warm ivory paper, near-black ink, vermilion highlights, muted blue file cards, thin clean connectors, ample whitespace, crisp highly readable typography. Top left small brand "jevgrep". Top main text exactly "40% lower coding-agent cost". Below it smaller exact text "One 10-task SWE-bench repeat". Middle: a clear left-to-right three-step illustrated flow with exact labels "Ask a repo question" then "Jev finds relevant code" then "Agent implements + tests". Use a speech card, branching folder/file tree highlighting qualifying files, then a compact source/code card and checkmark. Below flow a simple text comparison (not a misleading chart): "Baseline $7.62" then "With jg $4.52". Directly below, prominent readable disclosure: "Task solves: 8/10 baseline → 7/10 with jg". Bottom two lines readable, not tiny: "Full Sol task cost, including failed tasks. Jev cost excluded." and "Single repeat on a tuned Python subset. Savings are not guaranteed." Do not claim faster runtime or equal quality. Render all requested text exactly, with clear spacing. Numbers must not be changed. This standalone shareable graphic should explain both what jg does and the scope of its observed cost reduction. No extra logos, no decorative fake text, no gradients, no robot imagery.
+Update this README infographic, preserving the warm ivory/black/vermilion editorial aesthetic and clear three-step workflow. Replace the main headline with exactly "~30% lower coding-agent cost". Below it put exactly "Same solve rate. Less spend." Preserve the three headings "Ask a repo question", "Jev finds relevant code", "Agent implements + tests", and their illustrations, keeping the example pool size consistent at 10. Update the bottom comparison to "Baseline $7.62" and "With jg $5.44". Replace the task-solves line with exactly "8/10 solves with and without jg". Footer two readable lines: "10-task Python SWE-bench subset. Observed reduction: 28.6%." and "Full Sol task cost, including failures. Jev excluded." Remove every old 40%, $4.52, and 7/10 claim. Ensure all type fits cleanly, no tiny stray marks, no speed claim. Landscape about 1.6:1. Use exact text; ~30% is an honest rounded headline, 28.6% in footer is precise.
 
-### Final explainer edit
+### Final wording refinement
 
-Make a small final refinement to this Jevgrep explainer, preserving the entire layout, colors, headline, numbers, solve-rate disclosure, footnotes and all three stage headings exactly. Replace only the question bubble text with "Where is connection pooling configured? I need to add retries." in the same large readable monospaced style. Remove the tiny stray dark speck at the lower-left inside that bubble. In the right-hand example code card, simplify the body to just three large legible monospaced lines: "create_engine(", " pool_size=10,", ")" with the middle line highlighted pale green; preserve its src/db/connection.py header. Increase readability of the central tree's filename labels modestly if possible without overlap. No changes to the benchmark claims or other text.
+Edit only the subtitle in this image. Replace "Same solve rate. ~30% lower cost." with exactly "Same intelligence. ~30% lower cost." Preserve every other element, all illustration, wordmark, jg pill, colors, margins, aspect ratio, and footnote. Fit the new phrase legibly in the existing subtitle space. No other text changes.
+
+Edit only two text lines in this image. Replace subtitle "Same solve rate. Less spend." with exactly "Same intelligence. Less spend." Replace "8/10 solves with and without jg" with exactly "8 of 10 tasks solved — with and without jg". Preserve everything else including headline "~30% lower coding-agent cost", workflow, example code, prices Baseline $7.62 and With jg $5.44, and both benchmark footer lines. Keep typography crisp and fit the text with generous margins, no other changes.
 
 ## Visual review
 
-Final semantic correction prompt: Edit ONLY the text inside the left speech bubble in this image. Replace it with exactly "Where is pooling configured? I need a pool of 10 connections." Keep the font large, monospaced and readable, wrapped naturally within the existing bubble. Remove the stray speck inside the bottom-left of the bubble. Preserve EVERY other pixel as closely as possible: all headings, diagrams, code showing pool_size=10, numbers, benchmark disclosures, colors and layout must remain unchanged.
-
-An independent visual pass checked typography, layout, and benchmark disclosure.
-The final edits simplified the example code for readability and matched the
-requested pool size to the illustrated implementation. Fine file labels remain secondary at README
-width; open the image for detail. The cover is an abstract discovery illustration,
-not a literal filesystem. A tiny mark inside the speech bubble is cosmetic.
+A fresh visual review found no clipping, overlap, misspellings or conflicting
+benchmark numbers. The cover footnote is secondary at README scale; the README
+and explainer also state its scope. A small punctuation speck remains inside the
+illustrative question bubble and does not affect the text or comparison.

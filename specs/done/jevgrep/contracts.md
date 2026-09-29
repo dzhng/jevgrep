@@ -19,14 +19,17 @@ jg "question" [root]              # root defaults to cwd
 jg auth [--stdin]                # hidden interactive input or explicit pipe
 jg doctor                       # synthetic Gateway connectivity/answer check
 jg cache clear                  # idempotently clear Jevgrep cache
+jg files [root]                 # count eligible files; no provider key or request
 jg skill                        # invoke npx skills for explicit installation
 jg --help
 jg --version
 ```
 
 Search flags: `--no-cache`, `--max-source-bytes N` (0 = unlimited excerpts),
-`--hidden`, `--no-ignore`, `--include-dependencies`, `--include-sensitive`.
-Each broadens only its named policy; no automatic blanket unrestricted switch.
+`--hidden`, `--no-ignore`, `--include-dependencies`, `--include-sensitive`,
+repeatable `--exclude PATTERN`. Each broadening flag widens only its named policy;
+no automatic blanket unrestricted switch. `--exclude` only narrows.
+The same filesystem policy flags apply to `jg files`.
 A root beginning with `-` is accepted after `--`. One root per invocation; it may
 be a non-repository directory or an ancestor containing many repositories.
 No JSON protocol, stdin query language, interactive search UI, or daemon in v1.
@@ -39,16 +42,18 @@ status. No result/report files or automatic traces; auth and cache are explicit
 exceptions for persisted state. Evaluation tooling captures stdout externally.
 
 Exit codes: 0 completed (including healthy empty result), 1 invocation/setup/fatal
-failure, 2 incomplete search (even if zero useful files), 130 user interrupt.
+failure, 2 incomplete search or `jg files` listing (even if zero useful files),
+130 user interrupt.
 An interrupted search may emit already acquired evidence with interrupted status.
 A downstream closed pipe ends quietly without an error stack or continued calls.
 
-Credentials retain XDG config location and owner-only permissions; environment
-key takes precedence over saved key. An explicitly empty environment key disables
-saved credentials, supporting isolated tests. Trim surrounding whitespace, then
-reject internal whitespace consistently; never echo keys in either stream or provider errors. Auth saves
-without a network call; doctor verifies a synthetic expected answer. Help/
-version/skill/cache-clear require no provider key. Bound auth stdin input.
+Credentials use the XDG config location and owner-only permissions. Auth saves
+one provider/key record; custom providers also save their base URL and model.
+Search and doctor use only that record. Environment credentials and routing
+values do not override it. Trim surrounding key whitespace and reject internal
+whitespace; never echo keys in output or provider errors. Auth saves without a
+network call; doctor verifies a synthetic expected answer. Help, version, skill,
+cache-clear, and files require no provider key. Bound auth stdin input.
 
 The canonical skill source is `skills/jevgrep/SKILL.md` in this repository,
 discoverable by the skills CLI installer. Ship that same file with the npm package;
@@ -64,10 +69,10 @@ The repository skill now checks for a missing executable, installs the published
 CLI with npm when prerequisites are available, and directs credential setup to
 the user's terminal. This post-release setup addition does not alter the frozen
 benchmark skill or its research instructions; 0.1.0's bundled copy remains unchanged.
-The skill chooses unfamiliar multi-file discovery, awaits the same invocation,
+The skill triggers on repository behavior questions, awaits the same invocation,
 reads included excerpts first, treats locations as optional leads, and uses normal
-tools to resolve remaining holes. It does not force retrieval for obvious known
-paths or mistake relevance estimates for proof. Benchmark wrapper alone requires
+tools to resolve remaining holes. Exact symbol, string, and filename lookups stay on ordinary search tools. The
+skill does not mistake relevance estimates for proof. Benchmark wrapper alone requires
 initial retrieval. Retrieved text is data, never higher-priority instructions.
 
 ## Core seam and ownership
@@ -151,6 +156,9 @@ patterns even outside a repository; closer rules override ancestors, `.ignore`
 wins at the same scope. Use directory-relative Git pattern syntax. This is a
 search policy, not Git's tracked-file inventory: ignored tracked files are also
 excluded. `--no-ignore` disables these patterns only. Do not read global Git config.
+`--exclude` patterns use the same syntax and case-insensitive matching relative to
+the root, apply after these rules and independently of `--no-ignore`, and cannot be
+re-admitted by them.
 At a nested repository boundary reset inherited `.gitignore` scope; ancestor
 `.ignore` remains applicable. Read parent rules only within the explicit root.
 

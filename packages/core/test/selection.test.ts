@@ -12,7 +12,11 @@ function evaluator(
     async evaluate(request) {
       const declarations = (request.state as { declarations: Declaration[] }).declarations;
       return Object.fromEntries(
-        declarations.map((declaration, index) => [`q${index}`, score(declaration, request)]),
+        declarations.flatMap((declaration, index) => [
+          [`q${index}`, score(declaration, request)],
+          [`scope${index}`, 1],
+          ...(request.questions[`ref${index}`] ? [[`ref${index}`, 0]] : []),
+        ]),
       );
     },
   };
@@ -63,7 +67,7 @@ test("strict thresholds keep .context out of leads without conflating it with so
   expect(result.file.leads.map((lead) => lead.name)).toEqual(["Example.alpha", "Example.gamma"]);
 });
 
-test("follow-up context expands without promoting its neighbors to positive evidence", async () => {
+test("valid contextual rejection retracts selection without promoting surrounding context", async () => {
   const method = (name: string) =>
     `    def ${name}(self):\n        a = 1\n        b = 2\n        c = 3\n        d = 4\n        e = 5\n        return a + b + c + d + e\n\n`;
   const source =
@@ -91,9 +95,6 @@ test("follow-up context expands without promoting its neighbors to positive evid
     evaluator((_d, request) => {
       calls++;
       expect((request.state as { selectedEvidence: unknown }).selectedEvidence).toEqual(evidence);
-      expect(request.questions.q0!.instructions).toContain(
-        "exact symbol, fixture object, or event handler explicitly referenced",
-      );
       return 0;
     }),
     async () => ({ evidence }),
@@ -102,21 +103,25 @@ test("follow-up context expands without promoting its neighbors to positive evid
   expect(calls).toBeGreaterThan(0);
   expect(second.file.rendered).toEqual([{ startLine: 1, endLine: source.split("\n").length }]);
   expect(second.file.excerpts[0]!.source).toBe(source);
-  expect(second.file.selected).toEqual(first.file.selected);
+  expect(second.file.selected).toEqual([]);
   expect(second.file.roles).toEqual(["implementation"]);
 });
 
 test("provider failures retain successful groups and fatal failures stop subsequent groups", async () => {
-  const source = Array.from({ length: 20 }, (_, i) => `function f${i}() { return ${i}; }\n`).join(
+  const source = Array.from({ length: 400 }, (_, i) => `function f${i}() { return ${i}; }\n`).join(
     "",
   );
   for (const kind of ["provider", "authentication", "request-limit", "cancelled"] as const) {
     let calls = 0;
+    let rejected: Array<{ startLine: number; endLine: number }> = [];
     const fake: Evaluator = {
       requests: 0,
       async evaluate(request) {
         calls++;
-        if (calls === 2) throw new EvaluationFailure(kind);
+        if (calls === 2) {
+          rejected = (request.state as { declarations: typeof rejected }).declarations;
+          throw new EvaluationFailure(kind);
+        }
         return Object.fromEntries(Object.keys(request.questions).map((key) => [key, 0.9]));
       },
     };
@@ -127,19 +132,21 @@ test("provider failures retain successful groups and fatal failures stop subsequ
       fake,
     );
     expect(result.issues).toEqual([{ kind, count: 1 }]);
-    expect(calls).toBe(kind === "provider" ? 3 : 2);
-    expect(result.file.selected).toEqual(
-      kind === "provider"
-        ? [
-            { startLine: 1, endLine: 8 },
-            { startLine: 17, endLine: 20 },
-          ]
-        : [{ startLine: 1, endLine: 8 }],
-    );
+    if (kind === "provider") expect(calls).toBeGreaterThan(2);
+    else expect(calls).toBe(2);
+    expect(result.file.selected[0]?.startLine).toBe(1);
+    expect(result.file.selected.some((range) => range.endLine === 400)).toBe(kind === "provider");
+    expect(rejected.length).toBeGreaterThan(0);
+    for (const failed of rejected)
+      expect(
+        result.file.selected.some(
+          (range) => range.startLine <= failed.endLine && range.endLine >= failed.startLine,
+        ),
+      ).toBe(false);
   }
 });
 
-test("partial giant lines stay byte-bounded in requests, selections and additive passes", async () => {
+test("partial giant lines stay byte-bounded and can be contextually rejected", async () => {
   const source = "é".repeat(18000) + "TARGET" + "z".repeat(75000) + "\n";
   const snapshot = { path: "large.txt", contentHash: "large", source };
   const first = await selectFile(
@@ -166,7 +173,7 @@ test("partial giant lines stay byte-bounded in requests, selections and additive
     async () => ({ evidence: [{ path: "other.txt", startLine: 1, endLine: 1, source: "TARGET" }] }),
     first.file,
   );
-  expect(second.file.selected).toEqual(first.file.selected);
+  expect(second.file.selected).toEqual([]);
   expect(second.file.excerpts).toEqual(first.file.excerpts);
 });
 
@@ -199,7 +206,7 @@ test("malformed group answers stay unknown without discarding previous successes
   expect(second.file.excerpts[0]!.source).toBe(source.split("\n").slice(0, 7).join("\n"));
 });
 
-test("ordinary large-source requests retain the frozen opening and eight-line window", async () => {
+test("large-source requests include bounded opening and local context", async () => {
   const source =
     ("//" + "x".repeat(500) + "\n").repeat(40) + "function target() {\n  return 1;\n}\n";
   const lines = source.split("\n");
@@ -238,4 +245,32 @@ test("previous evidence from changed bytes is discarded explicitly", async () =>
   expect(next.file.selected).toEqual([]);
   expect(next.file.leads).toEqual([]);
   expect(next.file.excerpts).toEqual([]);
+});
+
+test("scope excludes analogous code while a concrete reference can recover it", async () => {
+  const snapshot = {
+    path: "helper.ts",
+    contentHash: "fixed",
+    source: "export function helper() { return 1; }\n",
+  };
+  const fake: Evaluator = {
+    requests: 0,
+    async evaluate(request) {
+      return { q0: 0.95, scope0: 0.1, ...(request.questions.ref0 ? { ref0: 0.9 } : {}) };
+    },
+  };
+  const first = await selectFile(snapshot, "target behavior", 0.9, fake);
+  expect(first.file.selected).toEqual([]);
+  const second = await selectFile(
+    snapshot,
+    "target behavior",
+    0.9,
+    fake,
+    async () => ({
+      evidence: [{ path: "target.ts", startLine: 1, endLine: 1, source: "helper()" }],
+    }),
+    first.file,
+  );
+  expect(second.file.selected).toEqual([{ startLine: 1, endLine: 1 }]);
+  expect(second.file.presentationExcerpts?.[0]?.source).toContain("export function helper()");
 });

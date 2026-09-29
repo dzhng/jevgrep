@@ -70,7 +70,7 @@ fixture. **Reach:** fixture equality is not a promise of identical arrival or
 completion order in a live repository. Production retains completion order for
 cross-file evidence. **Verdict:** sound because it avoids hiding a semantic input
 change. **Confidence:** medium. Owners: [retrieval](../../../packages/core/src/retrieve.ts)
-and [reference tests](../../../test/reference/).
+and [reference tests](https://github.com/dzhng/jevgrep/blob/80a216bfa0bf04b2ec615ede81f7af32f1c14153/test/reference/).
 
 ### Use one child process for the bundled Python interpreter
 
@@ -202,7 +202,7 @@ transmitted cannot be undone. **Verdict:** sound for detected changes, without
 claiming atomic filesystem consistency. **Confidence:** high. Owners:
 [reader](../../../packages/core/src/filesystem.ts),
 [retrieval](../../../packages/core/src/retrieve.ts) and
-[attempt boundary](../../../packages/core/src/gateway.ts).
+[attempt boundary](../../../packages/core/src/evaluator.ts).
 
 ### Separate cache trouble from missing retrieval evidence
 
@@ -242,7 +242,7 @@ could wait or make more requests after the query already knows its key cannot wo
 was unspecified. **Reach:** each request and retry wait must listen to both caller
 cancellation and the shared authentication signal. **Verdict:** sound because one
 authentication failure cannot leave siblings spending work independently.
-**Confidence:** high. Owner: [evaluator](../../../packages/core/src/gateway.ts).
+**Confidence:** high. Owner: [evaluator](../../../packages/core/src/evaluator.ts).
 
 ### Retain acquired evidence on interruption, but not on invalidation
 

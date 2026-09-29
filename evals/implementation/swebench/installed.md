@@ -10,16 +10,21 @@ Preparation installs the packed npm artifact and dependencies once, then checks
 that same installation offline in every selected runtime image. Each check
 verifies the original source, agent versions and canonical packaged skill.
 The coding agent receives the archived prefix and runs the real `jg` executable
-on an internal network. The benchmark explicitly invokes `$jevgrep`, matching the accepted spike prompt;
-the retained skill begins by requiring retrieval. Retrieval limits come
+on an internal network. The benchmark prompt explicitly invokes `$jevgrep`, as required for the retrieval comparison;
+the public skill itself teaches CLI usage without prescribing a research workflow. Retrieval limits come
 from the frozen package's default policy.
+
+New preparations use the current canonical `skills/jevgrep/SKILL.md` by default
+and reject a package carrying different skill bytes. Use `--skill` only for an
+explicitly identified comparison; existing frozen plans retain their original
+skill for reproducibility.
 
 The plan binds one package, installed prefix, skill, safe task export, evaluator
 dataset and archived runner/broker/registry sources before any treatment runs.
 Existing studies remain unchanged; their archived source records the procedure used.
 A fresh full-cohort plan prevents combining the cheapest outcomes from different
 packages or experiments. A single-task plan is useful for diagnostics but cannot
-satisfy the cohort gate.
+support a claim about the full cohort.
 
 ```sh
 python3 evals/implementation/swebench/installed.py prepare \
@@ -29,9 +34,22 @@ python3 evals/implementation/swebench/installed.py run \
 ```
 
 Preparation and dry-run make no model calls. `prepare` defaults to all ten tasks;
+`--jev-provider typesafe` selects native Jev for a separately identified provider
+experiment. Sol continues through Gateway. The broker holds both real credentials;
+the agent receives only its scoped broker token. Native Jev cost is estimated from recorded input usage at the documented
+list price frozen in the runner. Total task cost includes both Sol and Jev.
+Missing usage or incomplete transport coverage leaves that total unknown.
 `--task` selects one registered task. `--evidence-root` locates the retained
 baseline and evaluator files when preparing from another checkout. The root
 `eval:swebench` alias points to this entry point; `--help` lists its arguments.
+
+If a retained Docker image was removed, restore its pinned official base and
+archived toolchain, then prepare that one task with `--runtime-image` and the new
+immutable image ID. Preparation verifies the base image's filesystem layers,
+source identity, tool versions and installed skill. The frozen plan records both
+image IDs; baseline receipts remain untouched. Preserve the rebuild recipe and
+toolchain checksum verification beside the study and disclose the rebuild when
+reporting timing comparisons.
 
 After reviewing the frozen plan, `run --all` without `--dry-run` executes the paid
 treatments sequentially. Load the Gateway credential through the authorized
@@ -58,12 +76,15 @@ Retained response costs still contribute to that subtotal when the transport log
 or a request-start entry is missing.
 These observations never enter the scored Sol task cost or change cost-win rules.
 
-`aggregate --plan ...` requires ten terminal attempts with official grading receipts,
-all eight baseline solves preserved by valid solved treatments, and at least seven
-valid solved results with complete billing and strictly lower cost. Failed or
-invalid treatments remain recorded as nonpasses and nonwins. Unknown costs cannot win and
-prevent reporting a full cohort cost total; the known subtotal remains explicit. The aggregate reports individual
-outcomes so failures remain visible.
+`aggregate --plan ...` reports official solves, protocol validity and billing for
+the selected tasks. It does not issue a promotion verdict. Unknown costs prevent
+a full cost total; the known subtotal remains explicit. Saved no-Jev results are
+historical context, not the release acceptance target.
+
+Compare a candidate with the preceding released package using the same tasks,
+model, harness and public skill. Official task completion is primary, with full
+Sol cost reported alongside it. Keep both package artifacts and every attempt;
+do not combine favorable results from different candidates.
 
 Run storage holds the frozen artifacts, agent output, patches, official reports
 and billing. [The broker](gateway_broker.py) retains exact Jev request/response
@@ -72,7 +93,7 @@ benchmark source and remain local with the ignored study evidence.
 
 [Focused tests](test_installed.py) run in an isolated Docker container. They cover
 prompt identity, drift rejection, no-call validation, retained attempts, incomplete
-billing, cohort acceptance and exact body capture through a synthetic provider.
+billing, aggregate reporting and exact body capture through a synthetic provider.
 
 ## Treatment work clock
 
@@ -91,15 +112,15 @@ Receipts retain work, credited retrieval and wall durations plus the disjoint
 credit intervals and native command IDs, so timing remains auditable.
 
 The recognizer accepts a direct installed `jg` search, including the native shell
-wrapper. It gives no credit to auth, doctor, cache, skill, help/version, compound
-commands, redirections or shell expansions. Ambiguous invocations count as work.
+wrapper. It recognizes search exclusions and gives no credit to files, auth,
+doctor, cache, skill, help/version, compound commands, redirections or shell expansions. Ambiguous invocations count as work.
 Event-observation timestamps measure what the harness sees, not provider execution
 time; malformed timing events invalidate the timing evidence rather than inventing
 credit. Process startup and time outside qualifying waits count toward work.
 
 The treatment prompt states this clock explicitly; its timing sentence therefore
 differs from the retained baseline prompt. Baseline prompt bytes, receipts, model,
-grading and the solve/Sol-cost acceptance rule are unchanged. This correction does
+grading are unchanged. This correction does
 not rescore old attempts or explain away earlier task failures. Schema-2 studies
 remain usable with their archived runner and wall-clock policy; the current runner
 requires a fresh schema-3 plan and rejects timing-policy drift.

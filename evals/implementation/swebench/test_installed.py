@@ -28,6 +28,28 @@ runner = load('installed')
 broker = load('gateway_broker')
 
 class InstalledTests(unittest.TestCase):
+    def test_rebuilt_runtime_records_new_identity_without_rewriting_baseline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path, _ = self.fixture(Path(temporary))
+            plan = json.loads(path.read_text())
+            item = plan['cells'][0]
+            baseline_path = Path(item['baseline']) / 'receipt.json'
+            original = baseline_path.read_bytes()
+            plan['runtime_rebuild'] = {
+                'original_image': item['cell']['image'],
+                'image': 'sha256:' + '1' * 64,
+                'source_pinned_ref': item['cell']['source_pinned_ref'],
+            }
+            item['cell']['image'] = plan['runtime_rebuild']['image']
+            runner.write_json(path, plan)
+            restored = runner.load_cohort(path)
+            self.assertEqual(restored['cells'][0]['cell']['image'], 'sha256:' + '1' * 64)
+            self.assertEqual(baseline_path.read_bytes(), original)
+            plan['runtime_rebuild']['source_pinned_ref'] = 'different-source'
+            runner.write_json(path, plan)
+            with self.assertRaisesRegex(ValueError, 'source/environment pairing'):
+                runner.load_cohort(path)
+
     def test_frozen_prompt_and_required_product_call(self):
         row = {'problem_statement': 'Fix behavior.'}
         self.assertEqual(hashlib.sha256(runner.baseline_prompt(row).encode()).hexdigest(), '41c7e3cf7acbc19d0b24ab55e6ea29fe3cdbc2b777549d158488c6c55baaa643')
@@ -128,9 +150,9 @@ class InstalledTests(unittest.TestCase):
 
     def test_only_unambiguous_standalone_search_gets_credit(self):
         for command in ['jg "query with ; punctuation"', "/bin/sh -lc 'jg query'",
-                        'jg --no-cache "query" /testbed', '/opt/jg-install/bin/jg "query" --max-source-bytes=0']:
+                        'jg --no-cache "query" /testbed', 'jg "query" --exclude tests/ --exclude=src/generated/', '/opt/jg-install/bin/jg "query" --max-source-bytes=0']:
             with self.subTest(command=command): self.assertTrue(runner.direct_jg_search(command))
-        for command in ['jg', 'jg doctor', 'jg auth --stdin', 'jg cache clear', 'jg skill', 'jg --help',
+        for command in ['jg', 'jg files', 'jg files /testbed', 'jg files --exclude tests/', 'jg doctor', 'jg auth --stdin', 'jg cache clear', 'jg skill', 'jg --help',
                         'jg -h', 'jg --version', 'jg "query" --version', 'jg "query"; sleep 5',
                         'jg "query" && sleep 5', 'sleep 5 | jg "query"', 'jg "query" > out',
                         'jg "$(sleep 5)"', 'env KEY=value jg "query"', 'echo jg "query"', 'jg "query" &', 'jg doc*', 'jg auth?', 'jg {auth,doctor}',
@@ -291,29 +313,29 @@ class InstalledTests(unittest.TestCase):
                 self.assertTrue(runner.existing_attempt(plan))
             self.assertEqual(json.loads((out/'receipt.json').read_text())['status'],'interrupted')
 
-    def test_cohort_gate_requires_eight_preserved_and_seven_fully_billed_wins(self):
+    def test_cohort_reports_official_results_and_incomplete_billing(self):
         with tempfile.TemporaryDirectory() as temporary:
             path,plan=self.fixture(Path(temporary),all_tasks=True)
             for index,item in enumerate(plan['cells']):
                 out=self.receipt(path,item)
                 runner.write_json(out/'grading-receipt.json',{'run_id':'jg-'+item['cell']['id'],'exit_code':0,'resolved_instances':int(item['baseline_resolved'])})
-                runner.write_json(out/'generation-accounting.json',{'cell':item['cell']['id'],'all_requests_accounted':index<7,'gateway_cost_usd':0.01 if index<7 else None,'known_gateway_cost_usd':0.01})
+                runner.write_json(out/'generation-accounting.json',{'cell':item['cell']['id'],'all_requests_accounted':index<7,'gateway_cost_usd':0.01 if index<7 else None,'known_gateway_cost_usd':0.01,'task_cost_complete':index<7,'task_cost_usd':0.02 if index<7 else None})
             with contextlib.redirect_stdout(io.StringIO()):result=runner.aggregate(argparse.Namespace(plan=path))
-            self.assertTrue(result['accepted']);self.assertEqual(result['baseline_solves_preserved'],8)
+            self.assertEqual(result['official_solves'],8);self.assertEqual(result['baseline_solves_preserved'],8)
             self.assertEqual(result['fully_billed_solved_cost_wins'],7);self.assertIsNone(result['fully_billed_total_usd'])
             for item in plan['cells'][8:]:
                 self.receipt(path,item,'failed')
             with contextlib.redirect_stdout(io.StringIO()):result=runner.aggregate(argparse.Namespace(plan=path))
-            self.assertTrue(result['accepted'])
+            self.assertEqual(result['official_solves'],8)
             self.assertFalse(result['cells'][-1]['protocol_valid'])
             self.assertAlmostEqual(result['known_gateway_subtotal_usd'],0.1)
             last=plan['cells'][-1]
             runner.write_json(Path(last['output'])/'grading-receipt.json',{'run_id':'jg-'+last['cell']['id'],'exit_code':1})
             with contextlib.redirect_stdout(io.StringIO()):result=runner.aggregate(argparse.Namespace(plan=path))
-            self.assertTrue(result['accepted'])
+            self.assertEqual(result['official_solves'],8)
             out=Path(plan['cells'][0]['output']);runner.write_json(out/'generation-accounting.json',{'cell':plan['cells'][0]['cell']['id'],'all_requests_accounted':False,'gateway_cost_usd':None,'successful_cost_win':True})
             with contextlib.redirect_stdout(io.StringIO()):result=runner.aggregate(argparse.Namespace(plan=path))
-            self.assertFalse(result['accepted']);self.assertEqual(result['fully_billed_solved_cost_wins'],6)
+            self.assertIsNone(result['fully_billed_total_usd']);self.assertEqual(result['fully_billed_solved_cost_wins'],6)
             runner.write_json(out/'grading-receipt.json',{'run_id':'jg-'+plan['cells'][0]['cell']['id'],'exit_code':0,'resolved_instances':0})
             with contextlib.redirect_stdout(io.StringIO()):result=runner.aggregate(argparse.Namespace(plan=path))
             self.assertEqual(result['baseline_solves_preserved'],7)
@@ -329,11 +351,11 @@ class InstalledTests(unittest.TestCase):
             plan['cells'][1]['output']=plan['cells'][0]['output'];runner.write_json(path,plan)
             with self.assertRaisesRegex(ValueError,'distinct attempt'):runner.load_cohort(path)
 
-    def test_single_task_cannot_claim_full_cohort_acceptance(self):
+    def test_unstarted_task_is_not_complete(self):
         with tempfile.TemporaryDirectory() as temporary:
             path,_=self.fixture(Path(temporary))
             with contextlib.redirect_stdout(io.StringIO()):result=runner.aggregate(argparse.Namespace(plan=path))
-            self.assertFalse(result['prospective_full_cohort']);self.assertFalse(result['accepted'])
+            self.assertFalse(result['prospective_full_cohort']);self.assertFalse(result['complete'])
 
     def jev_fixture(self, root):
         traces=root/'jev-traces';traces.mkdir()
@@ -354,7 +376,7 @@ class InstalledTests(unittest.TestCase):
             self.assertTrue(result['complete']);self.assertEqual(result['observed_cost_usd'],0.03)
             self.assertEqual(result['client_calls'],2);self.assertEqual(result['provider_attempts'],3)
             self.assertEqual(result['input_tokens'],20);self.assertEqual(result['output_tokens'],4)
-            self.assertFalse(result['included_in_scored_task_cost'])
+            self.assertTrue(result['included_in_scored_task_cost'])
 
     def test_jev_missing_invalid_or_unfinished_responses_leave_total_unknown(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -373,6 +395,19 @@ class InstalledTests(unittest.TestCase):
             events[-1]['transportError']='Interrupted'
             self.assertIsNone(runner.observed_jev(root,events,True,True)['observed_cost_usd'])
 
+    def test_jev_retained_bill_counts_when_client_disconnects_after_response_capture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);events=self.jev_fixture(root)
+            events[-1]['transportError']='BrokenPipeError'
+            events[-1]['responseBytes']=0
+            result=runner.observed_jev(root,events,True,True)
+            self.assertTrue(result['complete'])
+            self.assertEqual(result['observed_cost_usd'],0.03)
+            self.assertEqual(result['input_tokens'],20)
+            response=root/'jev-traces'/('1'*32+'.response.json')
+            response.write_text('{')
+            self.assertFalse(runner.observed_jev(root,events,True,True)['complete'])
+
     def test_retained_jev_cost_survives_missing_log_or_request_start(self):
         for missing_log in [True, False]:
             with self.subTest(missing_log=missing_log),tempfile.TemporaryDirectory() as temporary:
@@ -390,7 +425,7 @@ class InstalledTests(unittest.TestCase):
                 self.assertEqual(result['known_provider_attempts'],3)
                 self.assertFalse(result['complete']);self.assertIsNone(result['observed_cost_usd'])
 
-    def test_observed_jev_cost_does_not_change_scored_sol_cost_win(self):
+    def test_jev_cost_changes_total_task_cost_win(self):
         with tempfile.TemporaryDirectory() as temporary:
             path,plan=self.fixture(Path(temporary));out=self.receipt(path,plan)
             events=self.jev_fixture(out)
@@ -407,7 +442,8 @@ class InstalledTests(unittest.TestCase):
             with patch.object(runner.urllib.request,'urlopen',side_effect=AssertionError('No network')),contextlib.redirect_stdout(io.StringIO()):
                 runner.account(argparse.Namespace(plan=path,task=None))
             result=json.loads((out/'generation-accounting.json').read_text())
-            self.assertEqual(result['gateway_cost_usd'],0.1);self.assertTrue(result['successful_cost_win'])
+            self.assertEqual(result['gateway_cost_usd'],0.1);self.assertFalse(result['successful_cost_win'])
+            self.assertAlmostEqual(result['task_cost_usd'],100.12)
             self.assertEqual(result['jev']['observed_cost_usd'],100.02)
 
     def test_native_usage_survives_missing_cost(self):
@@ -422,6 +458,21 @@ class InstalledTests(unittest.TestCase):
                 self.assertEqual(result['input_tokens'],22);self.assertEqual(result['output_tokens'],6)
                 self.assertEqual(result['observed_cost_usd'],float(cost)*2 if cost in ('0.04','0') else None)
                 self.assertEqual(result['complete'],cost in ('0.04','0'))
+
+    def test_native_list_price_estimate_requires_full_usage_and_known_model(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);events=self.jev_fixture(root)
+            for index in range(2):
+                response=root/'jev-traces'/(str(index)*32+'.response.json')
+                runner.write_json(response,{'model':'jev-1.13.0','usage':{'input_tokens':1_000_000,'output_tokens':500}})
+                events[index*2+1]['responseBytes']=response.stat().st_size
+            result=runner.observed_jev(root,events,True,True,'typesafe')
+            self.assertTrue(result['complete']);self.assertAlmostEqual(result['observed_cost_usd'],0.084)
+            self.assertEqual(result['cost_kind'],'estimate')
+            response.write_text('{}');events[-1]['responseBytes']=response.stat().st_size
+            result=runner.observed_jev(root,events,True,True,'typesafe')
+            self.assertFalse(result['complete']);self.assertIsNone(result['observed_cost_usd'])
+            self.assertAlmostEqual(result['known_cost_usd'],0.042)
 
     def test_preload_is_required_and_identity_checked(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -466,34 +517,38 @@ class InstalledTests(unittest.TestCase):
             self.assertFalse((root/'traces').exists())
 
     def test_broker_captures_exact_jev_bodies_without_auth_headers(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root=Path(temporary);config=root/'gateway.json';config.write_text(json.dumps({'key':'REAL_KEY_SENTINEL','token':'BROKER_TOKEN_SENTINEL','allow_jev':True,'agent_engine':'codex'}))
-            request_body=b'{"model":"typesafe-ai/jev","state":{"source":"public fixture"},"questions":{"q":{"type":"noul","instructions":"matches?"}}}';response_body=b'{"answers":{},"usage":{"input_tokens":11,"output_tokens":3},"provider_metadata":{"gateway":{"cost":"0.04","generationId":"gen_fixture"}}}'
-            forwarded={}
-            class Upstream(http.server.BaseHTTPRequestHandler):
-                def log_message(self,*args):pass
-                def do_POST(self):
-                    forwarded.update(path=self.path,body=self.rfile.read(int(self.headers['Content-Length'])),headers=dict(self.headers))
-                    self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(response_body)
-            upstream=http.server.ThreadingHTTPServer(('127.0.0.1',0),Upstream)
-            upstream_thread=threading.Thread(target=upstream.serve_forever,daemon=True);upstream_thread.start()
-            self.addCleanup(upstream_thread.join);self.addCleanup(upstream.server_close);self.addCleanup(upstream.shutdown)
-            with patch.object(broker,'CONFIG_PATH',str(config)),patch.object(broker,'TRACE_DIR',str(root/'traces')),patch.object(broker,'GATEWAY_ORIGIN','http://127.0.0.1:'+str(upstream.server_port)),contextlib.redirect_stdout(io.StringIO()):
-                server=http.server.ThreadingHTTPServer(('127.0.0.1',0),broker.Gateway)
-                thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
-                try:
-                    client=http.client.HTTPConnection('127.0.0.1',server.server_port)
-                    client.request('POST','/typesafe/v1/systemone',request_body,{'Authorization':'Bearer BROKER_TOKEN_SENTINEL','x-jevgrep-original-url':'https://ai-gateway.vercel.sh/typesafe/v1/systemone'})
-                    response=client.getresponse();self.assertEqual(response.status,200);self.assertEqual(response.read(),response_body);client.close()
-                finally:server.shutdown();server.server_close();thread.join()
-            self.assertEqual(forwarded['path'],'/typesafe/v1/systemone')
-            self.assertEqual(forwarded['body'],request_body)
-            self.assertEqual(forwarded['headers']['Authorization'],'Bearer REAL_KEY_SENTINEL')
-            self.assertNotIn('X-Jevgrep-Original-Url',forwarded['headers'])
-            requests=list((root/'traces').glob('*.request.json'));responses=list((root/'traces').glob('*.response.json'))
-            self.assertEqual(requests[0].read_bytes(),request_body);self.assertEqual(responses[0].read_bytes(),response_body)
-            for file in requests+responses:
-                self.assertEqual(file.stat().st_mode&0o777,0o600)
-                self.assertNotIn(b'REAL_KEY_SENTINEL',file.read_bytes());self.assertNotIn(b'BROKER_TOKEN_SENTINEL',file.read_bytes())
+        for provider in ('vercel', 'typesafe'):
+            with tempfile.TemporaryDirectory() as temporary:
+                root=Path(temporary);config=root/'gateway.json';config.write_text(json.dumps({'key':'REAL_KEY_SENTINEL','token':'BROKER_TOKEN_SENTINEL','allow_jev':True,'agent_engine':'codex','jev_provider':provider,'jev_key':'REAL_KEY_SENTINEL'}))
+                request_body=b'{"model":"typesafe-ai/jev","state":{"source":"public fixture"},"questions":{"q":{"type":"noul","instructions":"matches?"}}}';response_body=b'{"answers":{},"usage":{"input_tokens":11,"output_tokens":3},"provider_metadata":{"gateway":{"cost":"0.04","generationId":"gen_fixture"}}}'
+                if provider == 'typesafe':request_body=request_body.replace(b'typesafe-ai/jev',b'jev-1.13.0')
+                path='/v1/systemone' if provider == 'typesafe' else '/typesafe/v1/systemone'
+                origin='https://api.typesafe.ai' if provider == 'typesafe' else 'https://ai-gateway.vercel.sh'
+                forwarded={}
+                class Upstream(http.server.BaseHTTPRequestHandler):
+                    def log_message(self,*args):pass
+                    def do_POST(self):
+                        forwarded.update(path=self.path,body=self.rfile.read(int(self.headers['Content-Length'])),headers=dict(self.headers))
+                        self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(response_body)
+                upstream=http.server.ThreadingHTTPServer(('127.0.0.1',0),Upstream)
+                upstream_thread=threading.Thread(target=upstream.serve_forever,daemon=True);upstream_thread.start()
+                self.addCleanup(upstream_thread.join);self.addCleanup(upstream.server_close);self.addCleanup(upstream.shutdown)
+                with patch.object(broker,'CONFIG_PATH',str(config)),patch.object(broker,'TRACE_DIR',str(root/'traces')),patch.object(broker,'TYPESAFE_ORIGIN' if provider == 'typesafe' else 'GATEWAY_ORIGIN','http://127.0.0.1:'+str(upstream.server_port)),contextlib.redirect_stdout(io.StringIO()):
+                    server=http.server.ThreadingHTTPServer(('127.0.0.1',0),broker.Gateway)
+                    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+                    try:
+                        client=http.client.HTTPConnection('127.0.0.1',server.server_port)
+                        client.request('POST',path,request_body,{'Authorization':'Bearer BROKER_TOKEN_SENTINEL','x-jevgrep-original-url':origin+path})
+                        response=client.getresponse();self.assertEqual(response.status,200);self.assertEqual(response.read(),response_body);client.close()
+                    finally:server.shutdown();server.server_close();thread.join()
+                self.assertEqual(forwarded['path'],path)
+                self.assertEqual(forwarded['body'],request_body)
+                self.assertEqual(forwarded['headers']['Authorization'],'Bearer REAL_KEY_SENTINEL')
+                self.assertNotIn('X-Jevgrep-Original-Url',forwarded['headers'])
+                requests=list((root/'traces').glob('*.request.json'));responses=list((root/'traces').glob('*.response.json'))
+                self.assertEqual(requests[0].read_bytes(),request_body);self.assertEqual(responses[0].read_bytes(),response_body)
+                for file in requests+responses:
+                    self.assertEqual(file.stat().st_mode&0o777,0o600)
+                    self.assertNotIn(b'REAL_KEY_SENTINEL',file.read_bytes());self.assertNotIn(b'BROKER_TOKEN_SENTINEL',file.read_bytes())
 
 if __name__=='__main__':unittest.main()

@@ -63,7 +63,7 @@ order must not be normalized to make a comparison pass.
   never source or credentials. Completion-order changes can produce novel requests
   on a warm search; identical native requests still reuse successful answers.
 - Selected and rendered ranges remain distinct, and returned source is attributable
-  to snapshot bytes. The renderer preserves the accepted packet policy. Explicit
+  to snapshot bytes. The current renderer places source before detailed reading leads; see the [architecture](../../../docs/architecture.md). Explicit
   source-budget overrides do not remove qualifying file locations.
 - The CLI owns credentials, stdout, exit status and the canonical bundled skill.
   Core does not print. Incomplete or interrupted evidence is labeled; an empty
@@ -77,7 +77,7 @@ The [contracts](contracts.md) define public semantics; the
 [choices ledger](choices.md) records implementation decisions and tradeoffs.
 Mechanics live in [core](../../../packages/core/src/),
 [CLI](../../../apps/cli/src/), [installed tests](../../../test/installed.test.mjs)
-and [reference comparisons](../../../test/reference/). The
+and [retrieval behavior tests](../../../test/retrieval.test.ts). The
 [official runner guide](../../../evals/implementation/swebench/installed.md)
 owns retained-task execution and accounting. The
 [release guide](../../../scripts/RELEASING.md) owns deliberate publication.

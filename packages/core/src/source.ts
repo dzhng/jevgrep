@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { runPython } from "./python.ts";
+import { runParser } from "./parser.ts";
 
 export type Range = { startLine: number; endLine: number };
 import type { Snapshot } from "./filesystem";
@@ -10,11 +10,12 @@ export type SourceUnit = {
   sourceByteStart: number;
   sourceByteEnd: number;
   partial?: boolean;
+  ownerHeaders?: Range[];
 };
 export type Inspection = {
   units: SourceUnit[];
   comments: Range[];
-  mode: "python" | "typescript" | "text";
+  mode: "python" | "typescript" | "go" | "rust" | "text";
   fallback?: "unsupported" | "syntax" | "size";
 };
 
@@ -99,19 +100,23 @@ export async function inspect(
       : [],
   });
   if (Buffer.byteLength(source) > maxParseBytes) return fallback("size");
-  let units: { name: string; range: Range }[] = [],
+  let units: { name: string; range: Range; ownerHeaders?: Range[] }[] = [],
     comments: Range[] = [],
     mode: Inspection["mode"];
   let syntaxFallback = false;
   if (/\.pyi?$/.test(path)) {
     // A missing/incompatible packaged parser is a setup failure, never syntax fallback.
-    const parsed = await runPython<Array<Range & { name: string }>>(
+    const parsed = await runParser<Array<Range & { name: string; ownerHeaders: Range[] }>>(
       "inspect",
       source,
       options.signal,
     );
     if (parsed === null) return fallback("syntax");
-    units = parsed.map(({ name, startLine, endLine }) => ({ name, range: { startLine, endLine } }));
+    units = parsed.map(({ name, startLine, endLine, ownerHeaders }) => ({
+      name,
+      range: { startLine, endLine },
+      ownerHeaders,
+    }));
     comments = pythonComments;
     mode = "python";
   } else if (/\.(?:[cm]?[jt]s|[jt]sx)$/.test(path)) {
@@ -126,7 +131,7 @@ export async function inspect(
     syntaxFallback = !!(file as ts.SourceFile & { parseDiagnostics?: unknown[] }).parseDiagnostics
       ?.length;
     const line = (position: number) => file.getLineAndCharacterOfPosition(position).line + 1;
-    const add = (node: ts.Node, prefix = "") => {
+    const add = (node: ts.Node, prefix = "", ownerHeaders: Range[] = []) => {
       const named = node as ts.Node & { name?: ts.Node };
       const name =
         prefix +
@@ -137,12 +142,14 @@ export async function inspect(
       if (ts.isClassDeclaration(node) && node.members.length) {
         const start = line(node.getStart(file)),
           first = line(node.members[0]!.getStart(file));
-        if (first > start)
-          units.push({ name: name + ".context", range: { startLine: start, endLine: first - 1 } });
-        for (const member of node.members) add(member, name + ".");
+        const header = first > start ? { startLine: start, endLine: first - 1 } : undefined;
+        const headers = header ? [...ownerHeaders, header] : ownerHeaders;
+        if (header) units.push({ name: name + ".context", range: header, ownerHeaders: headers });
+        for (const member of node.members) add(member, name + ".", headers);
       } else
         units.push({
           name,
+          ownerHeaders,
           range: {
             startLine: line(node.getStart(file)),
             endLine: line(Math.max(node.getStart(file), node.end - 1)),
@@ -160,6 +167,16 @@ export async function inspect(
     };
     visit(file);
     mode = "typescript";
+  } else if (/\.(go|rs)$/.test(path)) {
+    const parsed = await runParser<{ units: typeof units; comments: Range[] }>(
+      "declarations",
+      JSON.stringify({ source, language: path.endsWith(".go") ? "go" : "rust" }),
+      options.signal,
+    );
+    if (!parsed) return fallback("syntax");
+    units = parsed.units;
+    comments = parsed.comments;
+    mode = path.endsWith(".go") ? "go" : "rust";
   } else return fallback("unsupported");
   comments = [...new Map(comments.map((r) => [`${r.startLine}:${r.endLine}`, r])).values()].sort(
     (a, b) => a.startLine - b.startLine,
@@ -182,8 +199,7 @@ export async function inspect(
     mode,
     comments,
     units: units.flatMap((unit) => {
-      // Frozen helpers report CPython line coordinates, while the caller slices on LF.
-      // Keep those coordinates even for CR-only source or an empty LF slice.
+      // Parser ranges and returned byte spans must remain tied to the original snapshot.
       const start = Math.min(
         text.bytes.length,
         text.offsets[unit.range.startLine - 1] ?? text.bytes.length,
@@ -198,11 +214,15 @@ export async function inspect(
             id: `${unit.name}:${start}:${end}`,
             name: unit.name,
             range: unit.range,
+            ownerHeaders: unit.ownerHeaders,
             sourceByteStart: start,
             sourceByteEnd: end,
           },
         ];
-      return textUnits(text, unit.range, unit.name, maxUnitBytes, true);
+      return textUnits(text, unit.range, unit.name, maxUnitBytes, true).map((part) => ({
+        ...part,
+        ownerHeaders: unit.ownerHeaders,
+      }));
     }),
   };
 }
@@ -215,7 +235,7 @@ export async function pythonNeighborhood(
 ): Promise<Range[]> {
   if (!/\.pyi?$/.test(snapshot.path) || Buffer.byteLength(snapshot.source) > 1_000_000) return [];
   return (
-    (await runPython<Range[]>(
+    (await runParser<Range[]>(
       "neighborhood",
       JSON.stringify({ source: snapshot.source, ranges: selected }),
       signal,
@@ -244,7 +264,7 @@ export type SourcePreview = {
   parseUnavailable?: boolean;
   scope?: string;
 };
-/** The frozen preview program owns both Python and generic text windows. */
+/** The preview worker handles Python declarations and generic text windows. */
 export async function pythonPreview(
   snapshot: Snapshot,
   query: string,
@@ -253,7 +273,7 @@ export async function pythonPreview(
 ): Promise<SourcePreview | null> {
   if (!Number.isSafeInteger(budget) || budget < 256)
     throw new Error("Preview allowance must be at least 256 bytes");
-  const result = await runPython<SourcePreview>(
+  const result = await runParser<SourcePreview>(
     "preview",
     JSON.stringify({ text: snapshot.source, path: snapshot.path, query, budget }),
     signal,

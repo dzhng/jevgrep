@@ -1,37 +1,29 @@
-# Parser conformance
+# Parser behavior
 
-The synthetic corpus in `fixtures/python-reference.json` records unmodified frozen
-Python helper results, with helper hashes. Expectations are captured in a Python
-container; application tests run the production inspector and bundled interpreter in Node.
-`capture-reference.py` reads that corpus on stdin and writes refreshed expectations
-on stdout when the original helpers are mounted read-only at `/reference`. Capture
-output is deliberately separate from assertion: a failing port never rewrites its
-own expected result.
+Tests cover original source coordinates, Unicode boundaries, declaration owners,
+syntax fallback and cancellation through the production inspection API. Unsupported languages retain lossless text fallback.
 
-The parser keeps class context separate from methods, includes decorators in their
-declarations, and treats function-local functions as part of the outer unit. Query
-preview windows and additive neighboring-method ranges preserve the recorded Python
-policy. Comments stay independently available for later context expansion.
+Python helpers in `reference/` are frozen test-only oracles from the replaced
+runtime. Differential fixtures compare declaration, preview, neighbourhood and
+inherited-call output using system Python in the test container. They are never
+shipped or executed by the CLI. Tree-sitter also recognizes modern Python syntax;
+it is not a CPython semantic validator. Python preview class-header context stops
+before the first member's decorators; the frozen CPython helper includes the
+first decorator line in that header. Decorators remain attached to the member's
+source. Neighbourhood ranges may also arrive in a different order; consumers
+combine them as ranges rather than relying on helper order.
 
-The reference language boundary is CPython 3.11: the retained Requests runtime
-uses 3.11.5 and the isolated fixture oracle uses 3.11.2. Production uses CPython
-3.11.3 through Pyodide and the unchanged frozen helpers. This removes the separate
-grammar and hand-written compatibility rules. Version differences remain explicit;
-the cases establish bounded conformance, not universal equivalence. Source bytes
-are retained, and no system Python executable is required by the product.
+Build once (`bun scripts/build-cli.ts`) before running source parser tests: the
+build copies pinned official grammar WASM into the generated assets directory.
+`bun run dev` prepares these assets automatically.
+`bun run test:parser` does this in Docker and checks the installed package too.
+Missing/corrupt parser assets are setup errors, never silently downloaded or
+misrepresented as malformed user source.
 
-Python context expansion preserves the reference's conservative whole-line comment
-matching, including hash-prefixed lines in multiline strings. TypeScript comment
-collection follows the reference AST-child traversal; it does not broaden expansion
-by walking additional closing-brace and literal tokens. Syntax
-errors use text chunks; asset loading errors are setup failures rather than silent
-behavior changes. The whole-CLI HTTP comparison in
-[the Python parity test](../reference/python-parity.test.ts) checks computed previews,
-fallback questions, follow-up evidence and stdout against the actual frozen bundle.
+Inherited-call tests preserve useful reading leads when a receiver or callee is
+parenthesized, or a selected excerpt contains only a multiline call’s opening
+line. They assert returned locations rather than the grammar’s node shape.
 
-Units carry byte spans into the same immutable snapshot as their one-based line
-ranges. Consumers use `sourceForUnit` for request text: widening a partial unit back
-to whole lines would defeat the bound. UTF-8 boundaries and original line endings
-survive splitting, including a single oversized line. The parser-size ceiling uses
-bounded chunks rather than discarding source. These mechanism tests do not replace
-the packed Node-only CLI conformance gate.
+Go/Rust tests exercise named selection, declaration groups, generic receivers,
+Rust owner/attribute context, and byte-preserving fallback. Installed coverage
+checks late-method previews, exact selected source, and missing/corrupt grammars.

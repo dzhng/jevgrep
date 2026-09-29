@@ -39,13 +39,12 @@ const providers = {
   openrouter: {
     label: "OpenRouter",
     url: "https://openrouter.ai/api/v1/systemone",
-    model: "jev-1.13",
+    model: "typesafe/jev-1.13",
   },
-  cloudflare: {
-    label: "Cloudflare AI Gateway",
-    url: "https://gateway.ai.cloudflare.com/v1/fixture-account/fixture-gateway/workers-ai/run/typesafe/jev",
-    model: "typesafe/jev",
-    gatewayURL: "https://gateway.ai.cloudflare.com/v1/fixture-account/fixture-gateway",
+  opencode: {
+    label: "OpenCode Zen",
+    url: "https://opencode.ai/zen/v1/systemone",
+    model: "jev-1.13",
   },
 };
 const fixtureKey = "installed-http-fixture-key";
@@ -119,14 +118,10 @@ async function context(t, mode = "healthy", executable = binary) {
       const preset = providers[expectedProvider];
       assert.equal(request.url, new URL(preset.url).pathname);
       assert.equal(request.headers["x-jevgrep-original-url"], preset.url);
-      // Cloudflare's Workers AI route takes the gateway token and the model from its path.
-      const cloudflare = expectedProvider === "cloudflare";
       assert.ok(
-        request.headers[cloudflare ? "cf-aig-authorization" : "authorization"] ===
-          `Bearer ${expectedKey}`,
+        request.headers.authorization === `Bearer ${expectedKey}`,
         "Saved key must authenticate the request",
       );
-      if (cloudflare) assert.equal(request.headers.authorization, undefined);
       assert.match(request.headers["content-type"] ?? "", /^application\/json/);
       const chunks = [];
       let bytes = 0;
@@ -138,11 +133,8 @@ async function context(t, mode = "healthy", executable = binary) {
       const raw = Buffer.concat(chunks).toString("utf8");
       assert.ok(!raw.includes(forbidden), "Ignored/hidden source reached the provider");
       const body = JSON.parse(raw);
-      assert.deepEqual(
-        Object.keys(body).sort(),
-        cloudflare ? ["questions", "state"] : ["model", "questions", "state"],
-      );
-      if (!cloudflare) assert.equal(body.model, preset.model);
+      assert.deepEqual(Object.keys(body).sort(), ["model", "questions", "state"]);
+      assert.equal(body.model, preset.model);
       assert.equal(
         typeof body.state,
         "object",
@@ -204,10 +196,14 @@ async function context(t, mode = "healthy", executable = binary) {
           response.end(JSON.stringify({ answers: {} }));
           return;
         }
-        probabilities = body.state.declarations.map((declaration) => {
+        probabilities = Object.keys(body.questions).map((id) => {
+          const match = /^(q|scope|ref)(\d+)$/.exec(id);
+          assert.ok(match, `Unknown declaration judgment: ${id}`);
+          const declaration = body.state.declarations[Number(match[2])];
+          assert.ok(declaration, `Missing declaration for ${id}`);
           assert.ok(Number.isInteger(declaration.startLine) && declaration.startLine >= 1);
           assert.ok(declaration.endLine >= declaration.startLine);
-          return declaration.name.endsWith(".record_event") ? 0.95 : 0.05;
+          return match[1] === "scope" || declaration.name.endsWith(".record_event") ? 0.95 : 0.05;
         });
       } else if (Object.hasOwn(body.questions, "implementation")) {
         probabilities = Object.keys(body.questions).map((name) =>
@@ -224,14 +220,15 @@ async function context(t, mode = "healthy", executable = binary) {
       const ids = Object.keys(body.questions);
       assert.equal(probabilities.length, ids.length);
       response.writeHead(200, { "content-type": "application/json" });
-      const answer = {
-        answers: Object.fromEntries(
-          ids.map((id, index) => [id, { type: "noul", noul: probabilities[index] }]),
-        ),
-        usage: { input_tokens: 1, output_tokens: 1 },
-        warnings: [{ type: "other", message: "installed-fixture-warning" }],
-      };
-      response.end(JSON.stringify(cloudflare ? { state: "Completed", result: answer } : answer));
+      response.end(
+        JSON.stringify({
+          answers: Object.fromEntries(
+            ids.map((id, index) => [id, { type: "noul", noul: probabilities[index] }]),
+          ),
+          usage: { input_tokens: 1, output_tokens: 1 },
+          warnings: [{ type: "other", message: "installed-fixture-warning" }],
+        }),
+      );
     })().catch((error) => {
       protocolErrors.push(error.message);
       response.writeHead(400, { "content-type": "application/json" });
@@ -278,10 +275,7 @@ async function context(t, mode = "healthy", executable = binary) {
       const stdout = [],
         stderr = [];
       let outputBytes = 0;
-      const timer = setTimeout(
-        () => signalChild(child, "SIGKILL"),
-        mode === "stalled" ? 120_000 : 45_000,
-      );
+      const timer = setTimeout(() => signalChild(child, "SIGKILL"), 120_000);
       for (const [stream, chunks] of [
         [child.stdout, stdout],
         [child.stderr, stderr],
@@ -370,7 +364,7 @@ function assertCachedRequestsAreReused(requests, before) {
   for (const { raw, body } of requests.slice(before)) {
     assert.ok(!seen.has(raw), "An identical successful native request bypassed the cache");
     seen.add(raw);
-    // Completion order is part of the frozen input; warm reads can create a genuinely new order.
+    // Completion order affects request context, so warm reads can produce different cache keys.
     assert.ok(Array.isArray(body.state.selectedEvidence));
     const evidenceContents = (value) =>
       JSON.stringify(value.state.selectedEvidence.map((item) => JSON.stringify(item)).sort());
@@ -473,6 +467,73 @@ test("skill command delegates installation to npx without credentials", async (t
   assert.match(unavailable.stdout, /requires npx/);
 });
 
+test("installed Go/Rust search indexes late methods and selects their source instead of distant noise", async (t) => {
+  const fixture = await context(t, async ({ body, response }) => {
+    const answers = Object.fromEntries(
+      Object.keys(body.questions).map((id) => {
+        const match = /^(q|scope|ref)(\d+)$/.exec(id);
+        const selected =
+          body.state.declarations && match
+            ? match[1] === "scope" ||
+              (match[1] === "q" &&
+                body.state.declarations[Number(match[2])].name.endsWith(".record_event"))
+            : !id.startsWith("ref");
+        return [id, { type: "noul", noul: selected ? 0.95 : 0.05 }];
+      }),
+    );
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ answers }));
+    return true;
+  });
+  const files = [
+    [
+      "sample.go",
+      "package sample\n" +
+        Array.from(
+          { length: 160 },
+          (_, i) => `func noise${i}() string { return "DISTANT_NOISE_${i}_${"x".repeat(100)}" }\n`,
+        ).join("") +
+        'type Box struct {}\nfunc (b *Box) record_event() string { return "go-evidence" }\n',
+      "go-evidence",
+    ],
+    [
+      "sample.rs",
+      Array.from(
+        { length: 160 },
+        (_, i) => `fn noise${i}() -> &'static str { "DISTANT_NOISE_${i}_${"x".repeat(100)}" }\n`,
+      ).join("") +
+        'struct Box;\n#[allow(dead_code)]\nimpl Box {\n #[inline]\n pub fn record_event(&self) -> &str { "rust-evidence" }\n}\n',
+      "rust-evidence",
+    ],
+  ];
+  for (const [path, source] of files) await writeFile(join(fixture.tree, path), source);
+  const result = await fixture.run([query, fixture.tree, "--no-cache"]);
+  assert.equal(result.code, 0, result.stdout);
+  for (const [path, , marker] of files) {
+    assert.ok(
+      fixture.requests.some(
+        ({ body }) =>
+          body.state.path === path &&
+          body.state.preview?.truncated &&
+          body.state.preview.declarations?.some((d) => d.name === "Box.record_event"),
+      ),
+      `Missing late-method preview for ${path}`,
+    );
+    assert.ok(
+      fixture.requests.some(
+        ({ body }) =>
+          body.state.path === path &&
+          body.state.declarations?.some((d) => d.name === "Box.record_event"),
+      ),
+      `Missing named selection for ${path}`,
+    );
+    assert.ok(result.stdout.includes(marker), result.stdout);
+  }
+  assert.ok(result.stdout.includes("#[allow(dead_code)]"), result.stdout);
+  assert.ok(result.stdout.includes("#[inline]"), result.stdout);
+  assert.ok(!result.stdout.includes("DISTANT_NOISE_0_"), result.stdout);
+});
+
 test("actual installed search parses Python and returns every relevant hierarchy branch", async (t) => {
   const fixture = await context(t);
   const result = await fixture.run([query, fixture.tree, "--no-cache"]);
@@ -500,6 +561,122 @@ test("actual installed search parses Python and returns every relevant hierarchy
     fixture.requests.length > before,
     "A preceding --no-cache search must not populate reusable answers",
   );
+});
+
+test("search concurrency limits all stages against a busy provider", async (t) => {
+  let active = 0;
+  let peak = 0;
+  const pending = [];
+  let initialSelectionArrivals = 0;
+  const fixture = await context(t, async ({ body, response }) => {
+    active++;
+    peak = Math.max(peak, active);
+    response.once("finish", () => active--);
+    if (active > 2) {
+      response.writeHead(503, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "Too many concurrent calls" }));
+      return true;
+    }
+    if (Array.isArray(body.state.declarations) && !body.state.selectedEvidence) {
+      initialSelectionArrivals++;
+      if (initialSelectionArrivals <= 2) {
+        await new Promise((resolve) => {
+          const deadline = setTimeout(resolve, 5000);
+          pending.push(() => {
+            clearTimeout(deadline);
+            resolve();
+          });
+          if (pending.length === 2) pending.forEach((release) => release());
+        });
+      }
+    }
+    return false;
+  });
+  complete(await fixture.run([query, fixture.tree, "--concurrency", "2", "--no-cache"]));
+  assert.equal(peak, 2);
+});
+
+test("incomplete searches explain the provider error and recover with the same cache", async (t) => {
+  const failedRequests = new Set();
+  const fixture = await context(t, ({ body, raw, response }) => {
+    if (body.state.path !== "beta/nested/second.py") return false;
+    if (!body.state.selectedEvidence) failedRequests.add(raw);
+    response.writeHead(503, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: `Provider temporarily unavailable ${fixtureKey}` }));
+    return true;
+  });
+  const first = await fixture.run([query, fixture.tree, "--concurrency", "2"]);
+  assert.equal(first.code, 2, first.stdout);
+  assert.ok(failedRequests.size > 0);
+  const before = fixture.requests.length;
+  fixture.mode = "healthy";
+  const recovered = await fixture.run([query, fixture.tree, "--concurrency", "1"]);
+  complete(recovered);
+  assert.ok(!recovered.stdout.includes("Provider error:"));
+  for (const raw of failedRequests)
+    assert.ok(
+      fixture.requests.slice(before).some((request) => request.raw === raw),
+      "Failed requests must reach the provider again with caching enabled",
+    );
+  t.diagnostic("Recovery succeeded with the same cache and no --no-cache override.");
+  assert.match(first.stdout, /Provider error:.*HTTP 503.*Provider temporarily unavailable/);
+  assert.match(first.stdout, /max concurrent requests: 2/);
+  assert.equal(first.stdout.split("Provider error:").length - 1, 1);
+});
+
+test("recovered navigation failures do not mask unrecovered diagnostics", async (t) => {
+  for (const stage of ["navigation", "selection", "role"]) {
+    let recovered = false;
+    let rejected = 0;
+    const fixture = await context(t, ({ body, response }) => {
+      if (!recovered && body.state.items?.length > 1) {
+        recovered = true;
+        response.writeHead(503, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "RECOVERED_NAVIGATION_FAILURE" }));
+        return true;
+      }
+      const target = "beta/nested/second.py";
+      const fails =
+        stage === "navigation"
+          ? body.state.items?.some((item) => item.path === target)
+          : body.state.path === target &&
+            (stage === "selection"
+              ? Array.isArray(body.state.declarations)
+              : Object.hasOwn(body.questions, "implementation"));
+      if (!fails) return false;
+      rejected++;
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: `UNRECOVERED_${stage}` }));
+      return true;
+    });
+    const result = await fixture.run([query, fixture.tree, "--no-cache"]);
+    assert.equal(result.code, 2, result.stdout);
+    assert.ok(recovered && rejected > 0);
+    assert.match(result.stdout, new RegExp(`Provider error:.*HTTP 400.*UNRECOVERED_${stage}`));
+    assert.ok(!result.stdout.includes("RECOVERED_NAVIGATION_FAILURE"));
+  }
+});
+
+test("incomplete searches distinguish rate limits from broken connections", async (t) => {
+  for (const mode of ["rate-limit", "disconnect"]) {
+    const fixture = await context(t, ({ response }) => {
+      if (mode === "disconnect") response.destroy();
+      else {
+        response.writeHead(429, { "content-type": "application/json", "retry-after": "0" });
+        response.end(JSON.stringify({ error: "Please slow down" }));
+      }
+      return true;
+    });
+    const result = await fixture.run([query, fixture.tree, "--concurrency", "1"]);
+    assert.equal(result.code, 2, result.stdout);
+    assert.match(
+      result.stdout,
+      mode === "disconnect"
+        ? /Provider error:.*Network request failed/
+        : /Provider error:.*HTTP 429.*Please slow down/,
+    );
+    assert.equal(result.stdout.split("Provider error:").length - 1, 1);
+  }
 });
 
 test("healthy negative evaluations produce a complete empty result", async (t) => {
@@ -581,6 +758,78 @@ test("doctor uses the installed SDK while missing credentials fail cleanly", asy
   assert.equal(fixture.requests.length, before);
 });
 
+test("doctor explains provider access restrictions without exposing credentials or metadata", async (t) => {
+  const fixture = await context(t, ({ response }) => {
+    response.writeHead(403, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        error: {
+          message: `Free tier users do not have access to this model. Upgrade to paid credits. Token: ${fixtureKey} ${fixtureKey.slice(0, 10)}\u001b[31m${fixtureKey.slice(10)}\n\u001b[0m`,
+          type: "no_providers_available",
+          param: { secret: fixtureKey },
+        },
+        providerMetadata: { private: "DO_NOT_PRINT_PROVIDER_METADATA" },
+      }),
+    );
+    return true;
+  });
+  const result = await fixture.run(["doctor"]);
+  assert.equal(result.code, 1);
+  assert.match(result.stdout, /Vercel AI Gateway.*HTTP 403/);
+  assert.match(
+    result.stdout,
+    /Free tier users do not have access to this model\. Upgrade to paid credits\./,
+  );
+  assert.ok(!result.stdout.includes("DO_NOT_PRINT_PROVIDER_METADATA"));
+  assert.ok(!result.stdout.includes("\u001b"));
+  assert.equal(result.stdout.trim().split("\n").length, 2);
+  assert.equal(fixture.requests.length, 1);
+});
+
+test("doctor omits messages containing keys split by separators", async (t) => {
+  const fixture = await context(t);
+  const first = fixtureKey.slice(0, 12);
+  const second = fixtureKey.slice(12);
+  for (const separator of ["\n", "\t", "\u200b", " ", "\u2028"]) {
+    fixture.mode = ({ response }) => {
+      response.writeHead(403, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({ error: { message: `Rejected token ${first}${separator}${second}` } }),
+      );
+      return true;
+    };
+    const result = await fixture.run(["doctor"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stdout, /HTTP 403/);
+    assert.match(result.stdout, /Check your saved key, model access, and provider billing/);
+    assert.ok(!result.stdout.includes(first));
+    assert.ok(!result.stdout.includes(second));
+    assert.ok(!result.stdout.includes("Rejected token"));
+  }
+});
+
+test("doctor reports HTTP failures without printing raw response bodies", async (t) => {
+  const fixture = await context(t);
+  for (const body of [
+    `<html>${fixtureKey} PRIVATE_RESPONSE_BODY</html>`,
+    JSON.stringify({ detail: { secret: fixtureKey, private: "PRIVATE_RESPONSE_BODY" } }),
+    "",
+  ]) {
+    fixture.mode = ({ response }) => {
+      response.writeHead(502, { "content-type": "application/json" });
+      response.end(body);
+      return true;
+    };
+    const before = fixture.requests.length;
+    const result = await fixture.run(["doctor"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stdout, /Vercel AI Gateway.*HTTP 502/);
+    assert.match(result.stdout, /Check your saved key, model access, and provider billing/);
+    assert.ok(!result.stdout.includes("PRIVATE_RESPONSE_BODY"));
+    assert.equal(fixture.requests.length - before, 2);
+  }
+});
+
 test("provider authentication failure stops immediately with fatal exit 1", async (t) => {
   const fixture = await context(t, "unauthorized");
   const result = await fixture.run([query]);
@@ -623,7 +872,7 @@ test("invalid navigation JSON remains incomplete without retrying or splitting",
   assert.ok(!result.stdout.includes("py-evidence-"));
 });
 
-test("a disconnected navigation request recovers through reference-compatible splitting", async (t) => {
+test("a disconnected navigation request recovers through bounded batch splitting", async (t) => {
   const fixture = await context(t, "disconnect");
   const result = await fixture.run([query]);
   complete(result);
@@ -771,7 +1020,7 @@ test("a head -200 consumer closes the stdout pipe without leaving jg running", a
   const result = await fixture.run([query], {}, true);
   assert.equal(result.code, 0);
   assert.match(result.stdout, /^Jevgrep: \d+ relevant files\.\n/);
-  assert.equal(result.stdout.trimEnd().split("\n").length, 200);
+  assert.equal(result.stdout.match(/\n/g)?.length, 200);
   assert.ok(!result.stdout.includes("End context."));
 });
 
@@ -797,36 +1046,63 @@ test("source budget preserves every file and lead while explicitly omitting sour
     stdout.split("\n").flatMap((line) => {
       const file = /^- ("(?:[^"\\]|\\.)*") —/.exec(line);
       if (file) return [file[1]];
-      return line.startsWith("  Reading lead ") ? [line] : [];
+      return /^  .+@\d+-\d+$/.test(line) ? [line] : [];
     });
   const expectedLocations = locations(unlimited.stdout);
   assert.equal(expectedLocations.filter((line) => line.startsWith('"')).length, branches.length);
-  assert.ok(expectedLocations.some((line) => line.startsWith("  Reading lead ")));
+  assert.ok(expectedLocations.some((line) => /^  .+@\d+-\d+$/.test(line)));
   assert.deepEqual(locations(bounded.stdout), expectedLocations);
   assertCachedRequestsAreReused(fixture.requests, before);
 });
 
-test("missing or corrupt packaged Python assets fail closed without downloads", async (t) => {
+test("missing or corrupt packaged parser assets fail closed without downloads", async (t) => {
   const scratch = await mkdtemp(join(tmpdir(), "jg-missing-python-"));
   t.after(() => rm(scratch, { recursive: true, force: true }));
-  for (const [asset, corrupt] of [
-    ["dist/bin/python-worker.mjs", false],
-    ["dist/assets/python/inspect.py", false],
-    ["node_modules/pyodide/pyodide.asm.wasm", false],
-    ["node_modules/pyodide/python_stdlib.zip", false],
-    ["node_modules/pyodide/pyodide.asm.wasm", true],
+  for (const [asset, corrupt, extension] of [
+    ["dist/bin/parser-worker.mjs", false],
+    ["dist/assets/tree-sitter/tree-sitter-python.wasm", false],
+    ["node_modules/web-tree-sitter/web-tree-sitter.wasm", false],
+    ["dist/assets/tree-sitter/tree-sitter-python.wasm", true],
+    ["dist/assets/tree-sitter/tree-sitter-go.wasm", false, "go"],
+    ["dist/assets/tree-sitter/tree-sitter-go.wasm", true, "go"],
+    ["dist/assets/tree-sitter/tree-sitter-rust.wasm", false, "rs"],
+    ["dist/assets/tree-sitter/tree-sitter-rust.wasm", true, "rs"],
   ]) {
     const copy = join(scratch, "package");
     await cp(packageDirectory, copy, { recursive: true, dereference: true });
     await access(join(copy, asset));
     if (corrupt) await writeFile(join(copy, asset), "corrupt runtime fixture");
     else await rm(join(copy, asset));
-    const fixture = await context(t, "healthy", join(copy, "dist/bin/index.js"));
+    const fixture = await context(
+      t,
+      extension
+        ? async ({ body, response }) => {
+            response.writeHead(200, { "content-type": "application/json" });
+            response.end(
+              JSON.stringify({
+                answers: Object.fromEntries(
+                  Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.95 }]),
+                ),
+              }),
+            );
+            return true;
+          }
+        : "healthy",
+      join(copy, "dist/bin/index.js"),
+    );
+    if (extension)
+      await writeFile(
+        join(fixture.tree, `broken.${extension}`),
+        extension === "go" ? "package sample\nfunc record_event() {}\n" : "fn record_event() {}\n",
+      );
     const result = await fixture.run([query, fixture.tree, "--no-cache"]);
     assert.equal(result.code, 1, `${asset} (corrupt=${corrupt}): ${result.stdout}`);
     assert.ok(result.stdout.trim(), "Asset failure must produce a diagnostic");
     assert.ok(
-      !fixture.requests.some(({ body }) => body.state.declarations),
+      !fixture.requests.some(
+        ({ body }) =>
+          body.state.declarations && (!extension || body.state.path === `broken.${extension}`),
+      ),
       "Unavailable parser assets must not fabricate declaration evidence",
     );
     await fixture.removeCredentials();
@@ -881,7 +1157,7 @@ test("installed queued freshness withholds excluded source uploads", async (t) =
         await new Promise((resolve) => {
           releases.push(resolve);
           if (releases.length === 8)
-            void writeFile(join(tree, ".ignore"), "large.txt\n").then(() =>
+            void writeFile(join(tree, ".ignore"), "large-*.txt\n").then(() =>
               releases.forEach((release) => release()),
             );
         });
@@ -899,11 +1175,13 @@ test("installed queued freshness withholds excluded source uploads", async (t) =
   t.after(() => releases.forEach((release) => release()));
   await rm(fixture.tree, { recursive: true });
   await mkdir(fixture.tree);
-  await writeFile(
-    join(fixture.tree, "large.txt"),
-    "QUEUED_INSTALLED_SENTINEL line\n".repeat(18000),
-  );
-  const result = await fixture.run([query, fixture.tree, "--no-cache"]);
+  for (let index = 0; index < 48; index++)
+    await writeFile(
+      join(fixture.tree, `large-${index}.txt`),
+      "QUEUED_INSTALLED_SENTINEL line\n".repeat(800),
+    );
+  // Fill every provider slot before changing the policy, leaving later uploads queued.
+  const result = await fixture.run([query, fixture.tree, "--concurrency", "8", "--no-cache"]);
   assert.equal(uploads, 8);
   assert.equal(result.code, 2, result.stdout);
   assert.match(result.stdout, /incomplete/);
@@ -916,9 +1194,8 @@ for (const [provider, preset] of Object.entries(providers))
     await fixture.removeCredentials();
     const key = `installed-${provider}-saved-key`;
     fixture.expectProvider(provider, key);
-    const gateway = preset.gatewayURL ? ["--gateway-url", preset.gatewayURL] : [];
     const auth = await fixture.run(
-      ["auth", "--provider", provider, ...gateway, "--stdin"],
+      ["auth", "--provider", provider, "--stdin"],
       {},
       false,
       key + "\n",
@@ -930,7 +1207,6 @@ for (const [provider, preset] of Object.entries(providers))
     assert.deepEqual(JSON.parse(await readFile(fixture.credentials, "utf8")), {
       provider,
       apiKey: key,
-      ...(preset.gatewayURL ? { gatewayURL: preset.gatewayURL } : {}),
     });
     assert.equal((await stat(fixture.credentials)).mode & 0o777, 0o600);
     assert.equal((await stat(fixture.credentialDirectory)).mode & 0o777, 0o700);
@@ -1019,16 +1295,9 @@ test("installed saved credentials defeat conflicting environment and environment
     AI_GATEWAY_MODEL: "environment-model",
     TYPESAFE_MODEL: "environment-model",
     OPENROUTER_MODEL: "environment-model",
-    CLOUDFLARE_API_TOKEN: "environment-cloudflare-key",
-    CF_AIG_TOKEN: "environment-cloudflare-gateway-key",
-    CLOUDFLARE_GATEWAY_URL: "http://127.0.0.1:1/forbidden",
   };
   for (const provider of Object.keys(providers)) {
-    const gatewayURL = providers[provider].gatewayURL;
-    await writeFile(
-      fixture.credentials,
-      JSON.stringify({ provider, apiKey: fixtureKey, ...(gatewayURL ? { gatewayURL } : {}) }),
-    );
+    await writeFile(fixture.credentials, JSON.stringify({ provider, apiKey: fixtureKey }));
     fixture.expectProvider(provider);
     const doctor = await fixture.run(["doctor"], conflicts);
     assert.equal(doctor.code, 0, doctor.stdout);
@@ -1048,15 +1317,8 @@ test("installed saved credentials defeat conflicting environment and environment
 
 test("installed invalid saved providers fail before HTTP without rewriting credentials", async (t) => {
   const fixture = await context(t);
-  const records = [null, "", "unknown", false, 0, {}, []].map((provider) => ({
-    provider,
-    apiKey: fixtureKey,
-  }));
-  // A Cloudflare record is only valid with its https gateway URL; it never falls back.
-  for (const gatewayURL of [undefined, "", "http://gateway.example/v1/a/g", "not a url"])
-    records.push({ provider: "cloudflare", apiKey: fixtureKey, gatewayURL });
-  for (const record of records) {
-    const original = JSON.stringify(record) + "\n";
+  for (const provider of [null, "", "unknown", false, 0, {}, []]) {
+    const original = JSON.stringify({ provider, apiKey: fixtureKey }) + "\n";
     await writeFile(fixture.credentials, original);
     for (const args of [["doctor"], [query]]) {
       const result = await fixture.run(args);

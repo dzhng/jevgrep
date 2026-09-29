@@ -111,12 +111,32 @@ def check_image(image):
     return actual
 
 
+def paired_runtime(baseline, rebuild=None):
+    if rebuild is None:
+        return baseline['image']
+    if (rebuild.get('original_image') != baseline['image'] or
+            rebuild.get('source_pinned_ref') != baseline['cell']['source_pinned_ref'] or
+            not re.fullmatch(r'sha256:[a-f0-9]{64}', rebuild.get('image', ''))):
+        raise ValueError('Rebuilt runtime does not match the retained source/environment pairing')
+    return rebuild['image']
+
+
 def prepare(args):
     root = args.evidence_root.resolve()
     selected = [item for item in REGISTRY['tasks'] if args.task in ('all', item['task'])]
     pairs = [(item, *load_pair(root / item['baseline'], root / REGISTRY['inputs'], item['task'])) for item in selected]
     baseline = pairs[0][1]
-    image = check_image(baseline['image'])
+    rebuild = None
+    if getattr(args, 'runtime_image', None):
+        if len(pairs) != 1:
+            raise ValueError('A rebuilt runtime must be prepared for one task at a time')
+        rebuild = {'original_image': baseline['image'], 'image': args.runtime_image,
+                   'source_pinned_ref': baseline['cell']['source_pinned_ref']}
+        base_layers = json.loads(text(['docker', 'image', 'inspect', rebuild['source_pinned_ref'], '--format', '{{json .RootFS.Layers}}']))
+        actual_layers = json.loads(text(['docker', 'image', 'inspect', rebuild['image'], '--format', '{{json .RootFS.Layers}}']))
+        if actual_layers[:len(base_layers)] != base_layers:
+            raise ValueError('Rebuilt runtime does not extend the pinned official source image')
+    image = check_image(paired_runtime(baseline, rebuild))
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
     out.chmod(0o700)
@@ -151,7 +171,7 @@ tar -C /opt -cf /tmp/installed-prefix.tar jg-install
         # Every image gets an offline check using the same installed bytes.
         cells = []
         for registered, fixed, _ in pairs:
-            runtime = check_image(fixed['image'])
+            runtime = check_image(paired_runtime(fixed, rebuild))
             check = 'jg-preflight-' + uuid.uuid4().hex[:12]
             try:
                 command(['docker', 'create', '--platform', 'linux/amd64', '--network', 'none', '--name', check, runtime, 'sh', '-ec',
@@ -165,7 +185,7 @@ tar -C /opt -cf /tmp/installed-prefix.tar jg-install
             finally:
                 subprocess.run(['docker', 'rm', '-f', check], capture_output=True)
             cell = {**fixed['cell'], 'id': 'installed-' + registered['task'] + '-' + uuid.uuid4().hex[:12],
-                    'arm': 'chunks', 'candidate': str(out / 'installed-prefix.tar')}
+                    'arm': 'chunks', 'candidate': str(out / 'installed-prefix.tar'), 'image': runtime}
             cells.append({'cell': cell, 'baseline': str(root / registered['baseline']),
                           'baseline_cost_usd': registered['cost_usd'], 'baseline_resolved': registered['resolved'],
                           'output': str(out / 'attempts' / registered['task'])})
@@ -182,6 +202,9 @@ tar -C /opt -cf /tmp/installed-prefix.tar jg-install
                 'registry': str(frozen / 'fixed-baselines.json'), 'dataset': str(root / REGISTRY['dataset']),
                 'tooling': str(root / REGISTRY['tooling']),
                 'artifacts': {str(path): digest(path) for path in artifacts}}
+        plan['jev_provider'] = getattr(args, 'jev_provider', 'vercel')
+        if rebuild:
+            plan['runtime_rebuild'] = rebuild
         write_json(out / 'plan.json', plan)
         print(json.dumps({'status': 'prepared', 'plan': str(out / 'plan.json'), 'tasks': len(cells)}))
     finally:
@@ -216,7 +239,8 @@ def load_cohort(path):
         cell = item['cell']
         registered = next(row for row in REGISTRY['tasks'] if row['task'] == cell['instance_id'])
         baseline, _ = load_pair(Path(item['baseline']), Path(plan['inputs']), cell['instance_id'])
-        expected = {**baseline['cell'], 'id': cell['id'], 'arm': 'chunks', 'candidate': cell['candidate']}
+        expected = {**baseline['cell'], 'id': cell['id'], 'arm': 'chunks', 'candidate': cell['candidate'],
+                    'image': paired_runtime(baseline, plan.get('runtime_rebuild'))}
         if cell != expected or not re.fullmatch(r'installed-[A-Za-z0-9_.-]+', cell['id']):
             raise ValueError('Treatment pairing changed')
         if cell['candidate'] not in plan['artifacts'] or item['baseline_cost_usd'] != registered['cost_usd'] or item['baseline_resolved'] != registered['resolved']:
@@ -296,13 +320,20 @@ def direct_jg_search(command):
             elif options and arg.startswith('--max-source-bytes='):
                 if not arg.split('=', 1)[1].isdigit():
                     return False
+            elif options and arg == '--exclude':
+                index += 1
+                if index >= len(argv) or not argv[index]:
+                    return False
+            elif options and arg.startswith('--exclude='):
+                if not arg.split('=', 1)[1]:
+                    return False
             elif options and arg.startswith('-'):
                 return False
             else:
                 positionals.append(arg)
             index += 1
         return (1 <= len(positionals) <= 2 and bool(positionals[0].strip()) and
-                positionals[0] not in ('auth', 'doctor', 'cache', 'skill'))
+                positionals[0] not in ('auth', 'doctor', 'cache', 'skill', 'files'))
     except ValueError:
         return False
 
@@ -398,6 +429,9 @@ def monitor_native(invocation, stdout, stderr, policy):
 def run(args):
     plan, row = load_plan(args.plan.resolve(), args.task)
     cell = plan['cell']
+    jev_provider = plan.get('jev_provider', 'vercel')
+    if jev_provider not in ('vercel', 'typesafe'):
+        raise ValueError('Unsupported Jev provider')
     image = check_image(cell['image'])
     if args.dry_run:
         print(json.dumps({'status': 'validated', 'paid_calls': 0, 'baseline_reused': plan['baseline'], 'image': image, 'cell': cell['id']}))
@@ -407,13 +441,15 @@ def run(args):
         return
     if not os.environ.get('AI_GATEWAY_API_KEY'):
         raise ValueError('AI_GATEWAY_API_KEY is required; load it through the authorized credential workflow')
+    if jev_provider == 'typesafe' and not os.environ.get('TYPESAFE_API_KEY'):
+        raise ValueError('TYPESAFE_API_KEY is required for native Jev')
     out = Path(plan['output'])
     out.mkdir(parents=True, exist_ok=False)
     out.chmod(0o700)
     tag = 'jg-native-' + uuid.uuid4().hex[:12]
     network, proxy = tag + '-net', tag + '-proxy'
     receipt = {'engine': 'codex', 'cell': cell, 'image': image, 'plan_sha256': digest(args.plan), 'started': time.time(), 'status': 'preparing',
-               'provider_route': 'vercel-ai-gateway', 'gateway_model': 'openai/gpt-5.6-sol', 'baseline': plan['baseline'], 'host_pid': os.getpid()}
+               'jev_provider': jev_provider, 'provider_route': 'vercel-ai-gateway', 'gateway_model': 'openai/gpt-5.6-sol', 'baseline': plan['baseline'], 'host_pid': os.getpid()}
     write_json(out / 'receipt.json', receipt)
     def dx(argv, user=None):
         return command(['docker', 'exec', *(['-u', user] if user else []), tag, *argv])
@@ -460,11 +496,11 @@ def run(args):
         (out / 'prompt.txt').write_text(prompt)
         receipt['prompt_sha256'] = digest(out / 'prompt.txt')
         token = uuid.uuid4().hex
-        put(proxy, '/run/gateway.json', json.dumps({'key': os.environ['AI_GATEWAY_API_KEY'], 'token': token, 'agent_engine': 'codex', 'allow_jev': True}).encode(), 'root:root')
+        put(proxy, '/run/gateway.json', json.dumps({'key': os.environ['AI_GATEWAY_API_KEY'], 'token': token, 'agent_engine': 'codex', 'allow_jev': True, 'jev_provider': jev_provider, 'jev_key': os.environ.get('TYPESAFE_API_KEY') if jev_provider == 'typesafe' else None}).encode(), 'root:root')
         dx(['mkdir', '-p', '/home/agent/.config/jevgrep'], 'agent')
         dx(['chmod', '700', '/home/agent/.config/jevgrep'], 'agent')
         dx(['mkdir', '-p', '/opt/jg-harness'])
-        put(tag, '/home/agent/.config/jevgrep/credentials.json', json.dumps({'provider': 'vercel', 'apiKey': token}).encode())
+        put(tag, '/home/agent/.config/jevgrep/credentials.json', json.dumps({'provider': jev_provider, 'apiKey': token}).encode())
         put(tag, '/opt/jg-harness/provider-route.mjs', Path(plan['provider_preload']).read_bytes(), 'root:root', '444')
         receipt['provider_preload_sha256'] = digest(plan['provider_preload'])
         config = ('model = "openai/gpt-5.6-sol"\nmodel_provider = "vercel"\nmodel_reasoning_effort = "medium"\n'
@@ -568,8 +604,8 @@ def valid_cost(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
-def observed_jev(out, events, log_valid, traces_copied):
-    """Sum response-level gateway.cost once; provider retries are counts, not extra prices."""
+def observed_jev(out, events, log_valid, traces_copied, provider="vercel"):
+    """Sum Gateway costs or estimate native input usage at the retained public rate."""
     starts = [event for event in events if event.get('kind') == 'jev-request-start']
     ids = [event.get('requestId') for event in starts]
     safe_ids = {identifier for identifier in ids if isinstance(identifier, str) and re.fullmatch(r'[a-f0-9]{32}', identifier)}
@@ -582,6 +618,10 @@ def observed_jev(out, events, log_valid, traces_copied):
     coverage = (log_valid and traces_copied is True and len(safe_ids) == len(ids) and
                 safe_ids == set(responses) == set(requests) == safe_end_ids and len(safe_end_ids) == len(ends) == len(ids))
     costs, inputs, outputs, attempts = [], [], [], []
+    native_rate = Decimal('0.042') / 1_000_000
+    pricing = {'source': 'https://docs.typesafe.ai/models', 'verified_date': '2026-09-28',
+               'model': 'jev-1.13.0', 'input_usd_per_million': 0.042, 'output_usd_per_million': 0,
+               'basis': 'Public list-price estimate; no free-credit or negotiated discounts applied'} if provider == 'typesafe' else None
     def count(value):
         return type(value) is int and value >= 0
     # Retained response metadata remains known even if transport logs were lost.
@@ -596,6 +636,10 @@ def observed_jev(out, events, log_valid, traces_copied):
             provider_attempts = gateway.get('routing', {}).get('totalProviderAttemptCount')
             if count(provider_attempts): attempts.append(provider_attempts)
             value = gateway.get('cost')
+            if provider == 'typesafe':
+                value = None
+                if body.get('model') == 'jev-1.13.0' and count(usage.get('input_tokens')):
+                    value = str(Decimal(usage['input_tokens']) * native_rate)
             # Billing can be absent while usage and transport coverage remain known.
             try:
                 if type(value) not in (str, int, float): raise ValueError('Missing cost')
@@ -609,8 +653,16 @@ def observed_jev(out, events, log_valid, traces_copied):
                 coverage = False
                 continue
             end = matching[0]
-            if (end.get('status') != 200 or end.get('transportError') or end.get('incompleteStream') or
-                    end.get('responseBytes') != response.stat().st_size or end.get('requestBytes') != requests[identifier].stat().st_size):
+            # The broker captures each Jev chunk before writing it to the client.
+            # A client disconnect can therefore leave a complete bill in the trace
+            # even though responseBytes (delivered bytes) is smaller. Count that
+            # paid request, including its retries; malformed JSON still fails above.
+            captured_after_disconnect = (end.get('transportError') == 'BrokenPipeError' and
+                count(end.get('responseBytes')) and end['responseBytes'] <= response.stat().st_size)
+            if (end.get('status') != 200 or end.get('incompleteStream') or
+                    (not captured_after_disconnect and (end.get('transportError') or
+                        end.get('responseBytes') != response.stat().st_size)) or
+                    end.get('requestBytes') != requests[identifier].stat().st_size):
                 coverage = False
         except (OSError, ValueError, KeyError, TypeError, AttributeError, InvalidOperation):
             coverage = False
@@ -619,9 +671,11 @@ def observed_jev(out, events, log_valid, traces_copied):
     if not math.isfinite(known):
         known = None
         complete = False
-    return {'basis': 'Retained response provider_metadata.gateway.cost or historical providerMetadata.gateway.cost; observed API metadata, not invoice reconciliation',
-            'included_in_scored_task_cost': False, 'client_calls': len(ids), 'responses_with_cost': len(costs),
+    return {'basis': 'Native input usage at retained list price' if pricing else 'Retained response Gateway cost metadata; not invoice reconciliation',
+            'pricing': pricing, 'cost_kind': 'estimate' if pricing else 'reported',
+            'included_in_scored_task_cost': True, 'client_calls': len(ids), 'responses_with_cost': len(costs),
             'complete': complete, 'observed_cost_usd': known if complete else None, 'known_cost_usd': known,
+            'responses_with_client_disconnect': sum(event.get('transportError') == 'BrokenPipeError' for event in ends),
             'input_tokens': sum(inputs) if coverage and len(inputs) == len(ids) else None,
             'output_tokens': sum(outputs) if coverage and len(outputs) == len(ids) else None,
             'provider_attempts': sum(attempts) if coverage and len(attempts) == len(ids) else None,
@@ -666,13 +720,17 @@ def account(args):
     write_json(path, lookups)
     complete = log_valid and bool(identifiers) and len(request_ids) == len(starts) == len(ends) == len(identifiers) == len(lookups) and request_ids == {event.get('requestId') for event in ends} == {event.get('requestId') for event in observations} and all(event.get('streamTerminal') == 'response.completed' and not event.get('incompleteStream') and not event.get('transportError') and event.get('status') == 200 for event in ends) and all(valid_cost(row.get('metadata', {}).get('total_cost')) for row in lookups)
     known = sum(row.get('metadata', {}).get('total_cost', 0) for row in lookups if valid_cost(row.get('metadata', {}).get('total_cost')))
-    result = {'cell': plan['cell']['id'], 'request_starts': len(starts), 'generation_ids': len(identifiers), 'all_requests_accounted': complete, 'known_gateway_cost_usd': known, 'gateway_cost_usd': known if complete else None, 'baseline_cost_usd': plan['baseline_cost_usd'], 'jev': observed_jev(out, events, log_valid, receipt.get('jev_traces_copied'))}
+    result = {'cell': plan['cell']['id'], 'request_starts': len(starts), 'generation_ids': len(identifiers), 'all_requests_accounted': complete, 'known_gateway_cost_usd': known, 'gateway_cost_usd': known if complete else None, 'baseline_cost_usd': plan['baseline_cost_usd'], 'jev': observed_jev(out, events, log_valid, receipt.get('jev_traces_copied'), plan.get('jev_provider', 'vercel'))}
+    jev = result['jev']
+    result['task_cost_complete'] = complete and jev['complete']
+    result['task_cost_usd'] = known + jev['observed_cost_usd'] if result['task_cost_complete'] else None
+    result['known_task_cost_usd'] = known + (jev['known_cost_usd'] or 0)
     grading = out / 'grading-receipt.json'
     if grading.exists():
         grade_receipt = json.loads(grading.read_text())
         result['official_resolved'] = grade_receipt.get('run_id') == 'jg-' + plan['cell']['id'] and grade_receipt.get('exit_code') == 0 and grade_receipt.get('resolved_instances') == 1
         result['protocol_valid'] = protocol_valid(receipt)
-        result['successful_cost_win'] = complete and result['official_resolved'] and result['protocol_valid'] and known < plan['baseline_cost_usd']
+        result['successful_cost_win'] = result['task_cost_complete'] and result['official_resolved'] and result['protocol_valid'] and result['task_cost_usd'] < plan['baseline_cost_usd']
     write_json(out / 'generation-accounting.json', result)
     print(json.dumps(result))
 
@@ -699,26 +757,28 @@ def aggregate(args):
         protocol = terminal and protocol_valid(receipt)
         solved = graded and grading.get('resolved_instances') == 1
         billed = (terminal and billing.get('cell') == item['cell']['id'] and
-                  billing.get('all_requests_accounted') is True and valid_cost(billing.get('gateway_cost_usd')))
-        cost = billing.get('gateway_cost_usd') if billed else None
+                  billing.get('task_cost_complete') is True and valid_cost(billing.get('task_cost_usd')))
+        cost = billing.get('task_cost_usd') if billed else None
         rows.append({'task': item['cell']['instance_id'], 'status': receipt.get('status', 'not-started'),
                      'terminal': terminal, 'grading_attempted': grade_attempted, 'graded': graded, 'protocol_valid': protocol, 'official_resolved': solved, 'resolved': solved and protocol,
                      'baseline_resolved': item['baseline_resolved'], 'baseline_cost_usd': item['baseline_cost_usd'],
-                     'fully_billed': billed, 'gateway_cost_usd': cost,
+                     'fully_billed': billed, 'task_cost_usd': cost,
+                     'gateway_cost_usd': billing.get('gateway_cost_usd') if belongs and billing.get('cell') == item['cell']['id'] else None,
                      'jev': billing.get('jev', {}) if belongs and billing.get('cell') == item['cell']['id'] else {},
                      'known_gateway_cost_usd': billing.get('known_gateway_cost_usd') if belongs and billing.get('cell') == item['cell']['id'] and valid_cost(billing.get('known_gateway_cost_usd')) else None,
                      'successful_cost_win': solved and protocol and billed and cost < item['baseline_cost_usd']})
     full = {row['task'] for row in rows} == {item['task'] for item in REGISTRY['tasks']}
     preserved = sum(row['baseline_resolved'] and row['resolved'] and row['protocol_valid'] for row in rows)
     wins = sum(row['successful_cost_win'] for row in rows)
-    complete = full and all(row['terminal'] and row['grading_attempted'] for row in rows)
+    complete = all(row['terminal'] and row['graded'] for row in rows)
     result = {'prospective_full_cohort': full, 'complete': complete, 'baseline_solves_preserved': preserved,
               'fully_billed_solved_cost_wins': wins,
-              'accepted': complete and preserved == REGISTRY['baseline_solves'] and wins >= REGISTRY['required_cost_wins'],
+              'official_solves': sum(row['official_resolved'] for row in rows),
+              'comparison_basis': 'Saved no-Jev baselines; descriptive only, not version acceptance',
               'known_gateway_subtotal_usd': sum(row['known_gateway_cost_usd'] for row in rows if row['known_gateway_cost_usd'] is not None),
-              'fully_billed_total_usd': sum(row['gateway_cost_usd'] for row in rows) if all(row['fully_billed'] for row in rows) else None,
-              'jev': {'included_in_scored_task_cost': False,
-                      'basis': 'Observed response API metadata, not invoice reconciliation',
+              'fully_billed_total_usd': sum(row['task_cost_usd'] for row in rows) if all(row['fully_billed'] for row in rows) else None,
+              'jev': {'included_in_scored_task_cost': True,
+                      'basis': 'Per-task reported Gateway costs or native list-price estimates; not invoice reconciliation',
                       'complete': all(row['jev'].get('complete') is True and valid_cost(row['jev'].get('observed_cost_usd')) for row in rows),
                       'known_cost_usd': sum(row['jev']['known_cost_usd'] for row in rows if valid_cost(row['jev'].get('known_cost_usd'))),
                       'observed_cost_usd': sum(row['jev']['observed_cost_usd'] for row in rows) if all(row['jev'].get('complete') is True and valid_cost(row['jev'].get('observed_cost_usd')) for row in rows) else None},
@@ -737,6 +797,8 @@ def main():
     prep.add_argument('--task', default='all', choices=['all', *[item['task'] for item in REGISTRY['tasks']]])
     prep.add_argument('--evidence-root', type=Path, default=ROOT)
     prep.add_argument('--skill', type=Path, default=ROOT / 'skills/jevgrep/SKILL.md')
+    prep.add_argument('--jev-provider', choices=['vercel', 'typesafe'], default='vercel', help='Jev route only; Sol remains on Gateway')
+    prep.add_argument('--runtime-image', help='Rebuilt image ID extending the pinned source; source/tool versions still verified, original image recorded')
     execute = sub.add_parser('run', help='Run the paid coding-agent treatment once, or validate without calls')
     execute.add_argument('--plan', type=Path, required=True)
     execute.add_argument('--dry-run', action='store_true')
@@ -744,7 +806,7 @@ def main():
     grading.add_argument('--plan', type=Path, required=True)
     billing = sub.add_parser('account', help='Reconcile full Sol billing; never count unknown charges as zero')
     billing.add_argument('--plan', type=Path, required=True)
-    summary = sub.add_parser('aggregate', help='Evaluate the prospective ten-task acceptance rule without model calls')
+    summary = sub.add_parser('aggregate', help='Summarize official results and billing without a promotion verdict')
     summary.add_argument('--plan', type=Path, required=True)
     for operation in [execute, grading, billing]:
         choice = operation.add_mutually_exclusive_group(required=True)

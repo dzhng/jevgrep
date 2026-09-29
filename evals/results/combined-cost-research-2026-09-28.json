@@ -1,0 +1,362 @@
+{
+  "status": "accepted by user for0.5.0 release after review",
+  "baseline": "total-cost-2026-09-28.json",
+  "candidate": "restored128",
+  "package_sha256": "15be7a2f9ccc42ab73fb146052da59e567e18c34911367b7979832d2b86ef834",
+  "baseline_report_sha256": "f1219f6d114448f058e9421ac89f2ffc277467b34f30593c1540cf6e04b5e96f",
+  "official_solves": 8,
+  "baseline_official_solves": 8,
+  "tasks": [
+    {
+      "name": "astropy",
+      "resolved": true,
+      "protocol_valid": true,
+      "fully_billed": true,
+      "combined_usd": 0.7165619919999999,
+      "jev_usd": 0.053494392,
+      "cost_upper_bound_usd": 0.7165619919999999,
+      "jev_cost_upper_bound_usd": 0.053494392,
+      "acceptance_cost_basis": "reported usage at retained list price",
+      "baseline_combined_usd": 0.493752812,
+      "baseline_jev_usd": 0.150145212
+    },
+    {
+      "name": "django",
+      "resolved": true,
+      "protocol_valid": true,
+      "fully_billed": true,
+      "combined_usd": 1.095760078,
+      "jev_usd": 0.102259878,
+      "cost_upper_bound_usd": 1.095760078,
+      "jev_cost_upper_bound_usd": 0.102259878,
+      "acceptance_cost_basis": "reported usage at retained list price",
+      "baseline_combined_usd": 1.503687584,
+      "baseline_jev_usd": 0.351474984
+    },
+    {
+      "name": "matplotlib",
+      "resolved": false,
+      "protocol_valid": true,
+      "fully_billed": true,
+      "combined_usd": 0.467903172,
+      "jev_usd": 0.080029572,
+      "cost_upper_bound_usd": 0.467903172,
+      "jev_cost_upper_bound_usd": 0.080029572,
+      "acceptance_cost_basis": "reported usage at retained list price",
+      "baseline_combined_usd": 0.596602188,
+      "baseline_jev_usd": 0.175165788
+    },
+    {
+      "name": "pylint",
+      "resolved": false,
+      "protocol_valid": true,
+      "fully_billed": true,
+      "combined_usd": 0.691407208,
+      "jev_usd": 0.052026408,
+      "cost_upper_bound_usd": 0.691407208,
+      "jev_cost_upper_bound_usd": 0.052026408,
+      "acceptance_cost_basis": "reported usage at retained list price",
+      "baseline_combined_usd": 0.292289784,
+      "baseline_jev_usd": 0.066664584
+    },
+    {
+      "name": "pytest",
+      "resolved": true,
+      "protocol_valid": true,
+      "fully_billed": true,
+      "combined_usd": 0.768812326,
+      "jev_usd": 0.032856726,
+      "cost_upper_bound_usd": 0.768812326,
+      "jev_cost_upper_bound_usd": 0.032856726,
+      "acceptance_cost_basis": "reported usage at retained list price",
+      "baseline_combined_usd": 0.528859888,
+      "baseline_jev_usd": 0.111920088
+    },
+    {
+      "name": "requests",
+      "resolved": true,
+      "protocol_valid": true,
+      "fully_billed": true,
+      "combined_usd": 0.298788644,
+      "jev_usd": 0.004342044,
+      "cost_upper_bound_usd": 0.298788644,
+      "jev_cost_upper_bound_usd": 0.004342044,
+      "acceptance_cost_basis": "reported usage at retained list price",
+      "baseline_combined_usd": 0.349568814,
+      "baseline_jev_usd": 0.012791814
+    },
+    {
+      "name": "scikit",
+      "resolved": true,
+      "protocol_valid": true,
+      "fully_billed": false,
+      "combined_usd": null,
+      "jev_usd": null,
+      "cost_upper_bound_usd": 0.39258190800000003,
+      "jev_cost_upper_bound_usd": 0.096783708,
+      "acceptance_cost_basis": "conservative provider-context ceiling for missing native charges; actual bill unknown",
+      "baseline_combined_usd": 0.292258492,
+      "baseline_jev_usd": 0.079381092
+    },
+    {
+      "name": "sphinx",
+      "resolved": true,
+      "protocol_valid": true,
+      "fully_billed": true,
+      "combined_usd": 0.546857152,
+      "jev_usd": 0.055463352,
+      "cost_upper_bound_usd": 0.546857152,
+      "jev_cost_upper_bound_usd": 0.055463352,
+      "acceptance_cost_basis": "reported usage at retained list price",
+      "baseline_combined_usd": 0.5392377340000001,
+      "baseline_jev_usd": 0.167765934
+    },
+    {
+      "name": "sympy",
+      "resolved": true,
+      "protocol_valid": true,
+      "fully_billed": true,
+      "combined_usd": 0.43280565000000004,
+      "jev_usd": 0.05894805,
+      "cost_upper_bound_usd": 0.43280565000000004,
+      "jev_cost_upper_bound_usd": 0.05894805,
+      "acceptance_cost_basis": "reported usage at retained list price",
+      "baseline_combined_usd": 0.359203994,
+      "baseline_jev_usd": 0.093028194
+    },
+    {
+      "name": "xarray",
+      "resolved": true,
+      "protocol_valid": true,
+      "fully_billed": true,
+      "combined_usd": 0.412758778,
+      "jev_usd": 0.066406578,
+      "cost_upper_bound_usd": 0.412758778,
+      "jev_cost_upper_bound_usd": 0.066406578,
+      "acceptance_cost_basis": "reported usage at retained list price",
+      "baseline_combined_usd": 0.7009377640000001,
+      "baseline_jev_usd": 0.270070164
+    }
+  ],
+  "combined_cost_upper_bound_usd": 5.824236908,
+  "baseline_combined_usd": 5.6563990539999995,
+  "known_combined_cost_usd": 5.7719391799999995,
+  "jev_cost_upper_bound_usd": 0.6026107079999999,
+  "baseline_jev_usd": 1.478407854,
+  "timing": {
+    "scope": "All ten frozen first attempts. wall_s includes retrieval and coding/localverification, excludes setup/officialgrading.",
+    "rows": [
+      {
+        "task": "django",
+        "baseline": {
+          "wall_s": 367.1729112920002,
+          "retrieval_wait_s": 99.5581932500354,
+          "work_s": 267.6147180419648,
+          "jev_calls": 921
+        },
+        "candidate": {
+          "wall_s": 390.6613638330018,
+          "retrieval_wait_s": 135.51508137502242,
+          "work_s": 255.1462824579794,
+          "jev_calls": 272
+        }
+      },
+      {
+        "task": "xarray",
+        "baseline": {
+          "wall_s": 154.6803119169781,
+          "retrieval_wait_s": 58.366360582993366,
+          "work_s": 96.31395133398473,
+          "jev_calls": 807
+        },
+        "candidate": {
+          "wall_s": 194.82056504196953,
+          "retrieval_wait_s": 0.0,
+          "work_s": 194.82056504196953,
+          "jev_calls": 114
+        }
+      },
+      {
+        "task": "sphinx",
+        "baseline": {
+          "wall_s": 125.24509529100033,
+          "retrieval_wait_s": 39.13462225004332,
+          "work_s": 86.110473040957,
+          "jev_calls": 496
+        },
+        "candidate": {
+          "wall_s": 105.9309443749953,
+          "retrieval_wait_s": 21.013335124996956,
+          "work_s": 84.91760924999835,
+          "jev_calls": 194
+        }
+      },
+      {
+        "task": "pytest",
+        "baseline": {
+          "wall_s": 130.86067179200472,
+          "retrieval_wait_s": 0.0,
+          "work_s": 130.86067179200472,
+          "jev_calls": 324
+        },
+        "candidate": {
+          "wall_s": 267.4302607080317,
+          "retrieval_wait_s": 0.0,
+          "work_s": 267.4302607080317,
+          "jev_calls": 75
+        }
+      },
+      {
+        "task": "scikit",
+        "baseline": {
+          "wall_s": 84.86842679098481,
+          "retrieval_wait_s": 0.0,
+          "work_s": 84.86842679098481,
+          "jev_calls": 249
+        },
+        "candidate": {
+          "wall_s": 173.54026812501252,
+          "retrieval_wait_s": 0.0,
+          "work_s": 173.54026812501252,
+          "jev_calls": 146
+        }
+      },
+      {
+        "task": "astropy",
+        "baseline": {
+          "wall_s": 96.07012474996736,
+          "retrieval_wait_s": 0.0,
+          "work_s": 96.07012474996736,
+          "jev_calls": 362
+        },
+        "candidate": {
+          "wall_s": 588.7129652500153,
+          "retrieval_wait_s": 333.5089325000299,
+          "work_s": 255.20403274998534,
+          "jev_calls": 114
+        }
+      },
+      {
+        "task": "requests",
+        "baseline": {
+          "wall_s": 91.80887075001374,
+          "retrieval_wait_s": 8.07811587501783,
+          "work_s": 83.73075487499591,
+          "jev_calls": 61
+        },
+        "candidate": {
+          "wall_s": 103.94635766599094,
+          "retrieval_wait_s": 13.504510041966569,
+          "work_s": 90.44184762402438,
+          "jev_calls": 13
+        }
+      },
+      {
+        "task": "sympy",
+        "baseline": {
+          "wall_s": 136.16144016600447,
+          "retrieval_wait_s": 0.0,
+          "work_s": 136.16144016600447,
+          "jev_calls": 281
+        },
+        "candidate": {
+          "wall_s": 135.5842262909864,
+          "retrieval_wait_s": 63.214656250027474,
+          "work_s": 72.36957004095893,
+          "jev_calls": 126
+        }
+      },
+      {
+        "task": "matplotlib",
+        "baseline": {
+          "wall_s": 211.51810679095797,
+          "retrieval_wait_s": 67.35965399997076,
+          "work_s": 144.1584527909872,
+          "jev_calls": 650
+        },
+        "candidate": {
+          "wall_s": 185.5360709169763,
+          "retrieval_wait_s": 44.53250691702124,
+          "work_s": 141.00356399995508,
+          "jev_calls": 178
+        }
+      },
+      {
+        "task": "pylint",
+        "baseline": {
+          "wall_s": 89.66493179096142,
+          "retrieval_wait_s": 0.0,
+          "work_s": 89.66493179096142,
+          "jev_calls": 203
+        },
+        "candidate": {
+          "wall_s": 243.55788329202915,
+          "retrieval_wait_s": 53.815367083007004,
+          "work_s": 189.74251620902214,
+          "jev_calls": 135
+        }
+      }
+    ],
+    "totals": {
+      "baseline": {
+        "wall_s": 1488.0508913308731,
+        "retrieval_wait_s": 272.4969459580607,
+        "work_s": 1215.5539453728124,
+        "jev_calls": 4354
+      },
+      "candidate": {
+        "wall_s": 2389.720905499009,
+        "retrieval_wait_s": 665.1043892920716,
+        "work_s": 1724.6165162069374,
+        "jev_calls": 1367
+      }
+    },
+    "caveats": [
+      "Single observed attempt per task; no baseline rerun. Provider/network/host conditions not controlled.",
+      "retrieval_wait_s is budget-credit time only for standalone commands. Zero does not mean zero retrieval time. Use wall_s for end-to-end task elapsed comparison.",
+      "Fixed cost benchmark is total-cost-2026-09-28, whose packages report0.4.3; current installed release0.4.4 has not been rerun as a new baseline."
+    ]
+  },
+  "accounting": {
+    "native_model": "jev-1.13.0",
+    "input_usd_per_million": 0.042,
+    "output_usd_per_million": 0,
+    "basis": "Published list-price estimate, not invoice reconciliation. Sol generation charges plus native Jev, including failed attempts and retries.",
+    "missing_native_calls": 19,
+    "task_with_missing_usage": "scikit",
+    "conservative_allowance_usd": 0.052297728,
+    "method": "65536inputtokens per missing native response; conservative published64kcontextceiling. Actual charges remain unknown; known subtotal alone exceeds baseline.",
+    "source": "https://docs.typesafe.ai/models"
+  },
+  "decision": "Measured official quality retained, native cost lower, combined cost higher. User accepts this tradeoff for0.5.0; it is not marketed as a combined-cost improvement.",
+  "comparison_controls": "All10task prompts byte-identical; source HEAD/tree,runtimeimage,engine/model/effort andruntimeversions match; onefirstattempt pertask; no rerunbaseline or cheapestcellpooling. Exact currentpublicskill packaged.",
+  "raw_evidence": "evals/runs/swebench/cost-half-research/restored128-cohort (ignored local run storage)",
+  "final_followup": {
+    "candidate": "compact32",
+    "package_sha256": "f70a358bf398d595b6ca9daedfdbb774c76ca68fb8dc0a640ff7050d45e9fa6e",
+    "change": "Only declaration cap128to32 relative to restored128package; all other package bytes identical.",
+    "task": "pytest-dev__pytest-6197",
+    "official_resolved": true,
+    "protocol_valid": true,
+    "actual_combined_cost_usd": null,
+    "known_combined_cost_usd": 0.708094676,
+    "known_sol_usd": 0.668771,
+    "jev_usd": 0.039323676,
+    "missing_sol_requests": 1,
+    "baseline_combined_usd": 0.528859888,
+    "decision": "Reject as combined-cost optimization: known charges alone already exceed fixedbaseline by33.9%. Added helper/test snippets in a fixed-query diagnostic did not establish an end-to-end win."
+  },
+  "initial_closeout_decision": "No new retrieval candidate promoted. Unsuccessful product experiments preserved in ignored researchpatch/packages, then reverted from working production code. Retain published0.4.4; no new cost-improvementrelease.",
+  "release_decision": {
+    "version": "0.5.0",
+    "candidate": "restored128",
+    "basis": "User explicitly accepts observed2\u20133%combinedincrease as practically equivalent for this release, withlowerJevcost andsameofficialsolverate. This is a product acceptance judgment, not a measured statistical margin of error.",
+    "changes": "Restore ten-task candidate, retain128declarationcap; finalcompact32trialnotpromoted.",
+    "limitations": "Same tuned10Python tasks; native list-price estimate;19missingnativechargesboundedconservatively; no speed/equivalence guarantee.",
+    "verification": {
+      "archive_sha256": "a4eb2a8d50aa5c62f4de4048dbb575f7110932706fe907b1382e1549c83b2f15",
+      "benchmark_fidelity": "CompiledCLIbyte-identicaltorestored128except0.4.4to0.5.0version; samearchivemembers, onlyCLIandpackageversionbytesdiffer.",
+      "checks": "Fullverify:97Buntests,18providerprotocol,22parser,4release,30harness,40installedDockerjourneys passed.10nativemacOSinstalledchecks passed. Independentreviewnoactionableregressions."
+    }
+  }
+}

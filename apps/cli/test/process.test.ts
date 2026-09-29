@@ -42,15 +42,14 @@ testInDocker("interactive auth hides input and exits 130 on interruption", async
   await withCli(async ({ home }) => {
     for (const mode of [
       "save",
-      "save-cloudflare",
+      "custom-save",
       "interrupt-provider",
       "interrupt-key",
       "cancel-provider",
       "cancel-key",
     ]) {
       const file = join(home, "jevgrep", "credentials.json");
-      const saves = mode.startsWith("save");
-      const previous = saves ? undefined : await readFile(file, "utf8");
+      const previous = mode === "save" ? undefined : await readFile(file, "utf8");
       const { stdout } = await execute(
         "python3",
         [
@@ -74,20 +73,24 @@ try:
                 output += part
     wait_for(b"Choose your Jev provider")
     mode = sys.argv[2]
-    if mode == "save-cloudflare":
-        os.write(master, b"\\x1b[B\\x1b[B\\x1b[B\\r")
-        wait_for(b"Cloudflare AI Gateway URL")
-        os.write(master, b"https://gateway.ai.cloudflare.com/v1/pty-account/pty-gateway\\r")
+    if mode == "custom-save":
+        os.write(master, b"\\x1b[B\\x1b[B\\x1b[B\\x1b[B\\r")
+        wait_for(b"Base URL")
+        os.write(master, b"http://127.0.0.1:8080/v1\\r")
+        wait_for(b"Model ID")
+        os.write(master, b"gateway/jev-2\\r")
         wait_for(b"API key")
-    elif not mode.endswith("provider"):
-        os.write(master, b"\\x1b[B\\x1b[B\\r")
-        wait_for(b"API key")
-    if mode.startswith("save"):
         os.write(master, b"pty-fixture-secret\\r")
-    elif mode.startswith("cancel"):
-        os.write(master, b"\\x03")
     else:
-        process.send_signal(signal.SIGINT)
+        if not mode.endswith("provider"):
+            os.write(master, b"\\x1b[B\\x1b[B\\r")
+            wait_for(b"API key")
+        if mode == "save":
+            os.write(master, b"pty-fixture-secret\\r")
+        elif mode.startswith("cancel"):
+            os.write(master, b"\\x03")
+        else:
+            process.send_signal(signal.SIGINT)
     rest, errors = process.communicate(timeout=5)
     output += rest
     echo = b""
@@ -110,20 +113,12 @@ finally:
         { env: { ...process.env, HOME: home, XDG_CONFIG_HOME: home } },
       );
       const result = JSON.parse(stdout);
-      expect(result.code).toBe(saves ? 0 : 130);
+      const saved = mode === "save" || mode === "custom-save";
+      expect(result.code).toBe(saved ? 0 : 130);
       expect(result.stderr).toBe("");
       expect(result.stdout + result.echo).not.toContain("pty-fixture-secret");
-      expect(result.stdout).toContain(saves ? "key saved" : "Interrupted");
-      if (mode === "save-cloudflare") {
-        expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
-          provider: "cloudflare",
-          apiKey: "pty-fixture-secret",
-          gatewayURL: "https://gateway.ai.cloudflare.com/v1/pty-account/pty-gateway",
-        });
-        expect(result.stdout.indexOf("OpenRouter")).toBeLessThan(
-          result.stdout.indexOf("Cloudflare AI Gateway"),
-        );
-      } else if (mode === "save") {
+      expect(result.stdout).toContain(saved ? "key saved" : "Interrupted");
+      if (mode === "save") {
         expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
           provider: "openrouter",
           apiKey: "pty-fixture-secret",
@@ -132,6 +127,14 @@ finally:
           result.stdout.indexOf("TypeSafe"),
         );
         expect(result.stdout.indexOf("TypeSafe")).toBeLessThan(result.stdout.indexOf("OpenRouter"));
+      } else if (mode === "custom-save") {
+        expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+          provider: "custom",
+          baseURL: "http://127.0.0.1:8080/v1",
+          model: "gateway/jev-2",
+          apiKey: "pty-fixture-secret",
+        });
+        expect(result.stdout).toContain("Custom endpoint (127.0.0.1:8080)");
       } else expect(await readFile(file, "utf8")).toBe(previous);
       expect(await readdir(join(home, "jevgrep"))).toEqual(["credentials.json"]);
     }

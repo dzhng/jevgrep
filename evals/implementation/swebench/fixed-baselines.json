@@ -3,7 +3,6 @@
   "dataset": "evals/runs/swebench/auto-research-80/evaluator-only/ten-dataset.json",
   "tooling": "evals/runs/tooling/swebench",
   "baseline_solves": 8,
-  "required_cost_wins": 7,
   "tasks": [
     {
       "task": "scikit-learn__scikit-learn-13124",

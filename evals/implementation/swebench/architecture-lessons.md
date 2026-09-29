@@ -1,12 +1,14 @@
-# Retrieval spike lessons
+# Retrieval research lessons
 
-This is an evidence summary, not a finished implementation specification. The
-[research ledger](../../runs/swebench/auto-research-80/research.json) owns the
-current candidate, hypotheses, experiment verdicts, and next action. The
-[best verified cohort](../../runs/swebench/auto-research-80/unit-locators-confirmation/result.json)
-improves cost without losing a baseline official solve and meets the user-revised
-seven-of-ten successful-cost-win target. The
-[accepted architecture](../../../docs/architecture.md) records the resulting decision.
+This document records historical experiments and their limits. The old spike's
+seven-of-ten cost-win target is retired; it is not a product acceptance rule.
+The [current architecture](../../../docs/architecture.md) defines version-to-version
+improvement, with official task completion primary and full Sol cost reported.
+The [final research report](../../results/relevance-threshold-2026-09-27.md)
+summarizes the adopted changes and measured limits. The local
+[research ledger](../../runs/swebench/cost20-research/research.json) retains raw attempt provenance. The
+[earlier ledger](../../runs/swebench/auto-research-80/research.json) preserves the
+original experiments; its acceptance decisions describe the rules used then.
 
 ## Measure the completed coding task
 
@@ -144,7 +146,7 @@ That is provisional evidence: query and classification varied, and the
 [frozen confirmation](../../runs/swebench/auto-research-80/test-adaptation-confirmation/result.json)
 ended with five verified cost wins, three definite non-wins, and one interrupted
 attempt with unknown full cost; one task was unrun under its stopping rule.
-The accepted incumbent remains unchanged.
+That experiment did not establish a replacement under the criteria used at the time.
 
 Classifier questions must distinguish storing input from merely reading it.
 [Paired source-shape checks](../../runs/swebench/auto-research-80/ownership-isolated-source-diagnostic/summary.json)
@@ -159,6 +161,7 @@ with an end-to-end improvement.
 All ten tasks have now been inspected and used in development. They span Python
 repositories, but are a small purposive sample with single fixed baselines.
 Repeated tuning on them is not untouched holdout evidence, and neither language
-generality nor whole-computer scaling has been established. A frozen candidate
-must still preserve baseline solves and meet the requested per-task cost target;
-aggregate savings alone cannot satisfy that contract.
+generality nor whole-computer scaling has been established. A new product version must be compared with the preceding released version under
+the current architecture’s evaluation policy. Historical spike thresholds and
+supplemental compatibility checks do not decide promotion. Aggregate savings alone
+do not establish better task completion.

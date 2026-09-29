@@ -1,20 +1,27 @@
 # Provider contract evidence
 
-Inspected 2026-09-26. These are documentation/source observations, not live service
-results. Verification uses a small adapter reproduction, not another
-retrieval experiment.
+Historical provider-port evidence: the frozen-spike compatibility requirements
+below were retired in favor of [official task completion and cost](../../../evals/cost-quality-policy.md).
+They do not constrain current retrieval, skill wording or output formatting.
 
-## Fixed presets
+Provider endpoints and model IDs live in the [preset registry](../../../packages/core/src/providers.ts).
+These sources explain the protocol choices behind those presets:
 
-| Provider ID  | AI SDK adapter base URL                    | Model sent in body | Evidence                                                                                                                                   |
-| ------------ | ------------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `vercel`     | `https://ai-gateway.vercel.sh/typesafe/v1` | `typesafe-ai/jev`  | [Vercel TypeSafe API](https://vercel.com/docs/ai-gateway/sdks-and-apis/typesafe) explicitly shows this model and `/typesafe/v1/systemone`. |
-| `typesafe`   | `https://api.typesafe.ai/v1`               | `jev-1.13.0`       | [TypeSafe models](https://docs.typesafe.ai/models) documents the versioned ID; pin it because retrieval thresholds are calibrated.         |
-| `openrouter` | `https://openrouter.ai/api/v1`             | `jev-1.13`         | [OpenRouter's Jev guide](https://openrouter.ai/blog/insights/what-is-jev/) documents the TypeSafe-compatible route and this bare model ID. |
+- [Vercel TypeSafe API](https://vercel.com/docs/ai-gateway/sdks-and-apis/typesafe)
+  documents the TypeSafe-compatible route rather than chat completions.
+- [TypeSafe models](https://docs.typesafe.ai/models) documents versioned model IDs;
+  pin the native model because retrieval thresholds are calibrated.
+- [OpenRouter's Jev guide](https://openrouter.ai/blog/insights/what-is-jev/)
+  documents its TypeSafe-compatible route and bare model ID.
+- [OpenCode Zen models](https://opencode.ai/v2/docs/console/models/#jev)
+  documents the same TypeSafe-compatible protocol. The existing adapter can serve
+  it without changing request or answer handling.
 
 The native TypeSafe client examples use a base URL without `/v1`; the AI SDK
 adapter appends only `/systemone`, so its presets include `/v1`. Do not substitute
 OpenRouter chat completions or its separate `/api/alpha/decisions` API.
+
+The OpenCode integration author reported live verification on 2026-09-27: `jg auth --provider opencode --stdin` saved the key and `jg doctor` reported `Jev connection verified through OpenCode Zen.`, confirming the Zen response matches the SDK's zod schema (noul answers). A real search returned relevant files.
 
 Versioned native/OpenRouter names do not prove identical backends or answers to
 Vercel's alias. Preserve existing thresholds; do not claim cross-provider solve
@@ -60,8 +67,8 @@ and the Vercel guide describe native errors; fixtures must use their shapes.
 Repository input: `ca7054ed4c50283030102d15cd73d816e85bc569`. This Git tree pins the
 pre-change production implementation, lockfile, policy, parser versions, source tree,
 skill, test harness, and previously recorded evidence. The additional historical
-source hashes are owned by [the reference manifest](../../../test/reference/manifest.json).
-Keep that manifest, its covered files, [the corpus](../../../test/reference/corpus.json),
+source hashes are owned by [the reference manifest](https://github.com/dzhng/jevgrep/blob/80a216bfa0bf04b2ec615ede81f7af32f1c14153/test/reference/manifest.json).
+Keep that manifest, its covered files, [the corpus](https://github.com/dzhng/jevgrep/blob/80a216bfa0bf04b2ec615ede81f7af32f1c14153/test/reference/corpus.json),
 and all historical benchmark results unchanged.
 
 The corpus compares a request multiset: independent network arrival order is not

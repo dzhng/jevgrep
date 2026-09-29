@@ -17,9 +17,7 @@ COPY LICENSE LICENSE
 RUN bun scripts/build-cli.ts
 RUN mkdir -p /opt/npm-cache && cd apps/cli && npm pack --ignore-scripts --pack-destination /opt && npm install --prefix /opt/npm-warm --cache /opt/npm-cache --ignore-scripts --no-audit --no-fund /opt/dzhng-jevgrep-*.tgz && chmod -R a+rX /opt/npm-cache
 ENV npm_config_cache=/opt/npm-cache npm_config_offline=true
-COPY evals/implementation/swebench/hierarchy-unit-locators-spike.ts evals/implementation/swebench/source-method-windows-spike.ts evals/implementation/swebench/source-method-declarations-spike.py evals/implementation/swebench/content-handoff-v47-spike.ts evals/implementation/swebench/content-handoff-v47-spike.py evals/implementation/swebench/complete-source-v64-spike.ts evals/implementation/swebench/preview-fragments-v51-spike.ts evals/implementation/swebench/source-neighborhood-spike.py evals/implementation/swebench/
 COPY evals/implementation/swebench/installed.py evals/implementation/swebench/gateway_broker.py evals/implementation/swebench/test_installed.py evals/implementation/swebench/
 COPY evals/implementation/swebench/fixed-baselines.json evals/implementation/swebench/
-RUN bun build evals/implementation/swebench/hierarchy-unit-locators-spike.ts --target=node --outfile=/opt/jevgrep-reference.mjs
 ENV JEVGREP_TEST_IN_DOCKER=1 HOME=/tmp/jevgrep-home XDG_CONFIG_HOME=/tmp/jevgrep-config XDG_CACHE_HOME=/tmp/jevgrep-cache
-CMD ["bun", "test", "test/reference/replay.test.ts"]
+CMD ["bash", "scripts/test-suite.sh"]

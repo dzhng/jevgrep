@@ -16,7 +16,7 @@ const questions = {
 const presets = [
   ["https://ai-gateway.vercel.sh/typesafe/v1", "typesafe-ai/jev"],
   ["https://api.typesafe.ai/v1", "jev-1.13.0"],
-  ["https://openrouter.ai/api/v1", "jev-1.13"],
+  ["https://openrouter.ai/api/v1", "typesafe/jev-1.13"],
 ];
 async function fixture(t, handler) {
   let calls = 0;

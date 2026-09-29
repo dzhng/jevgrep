@@ -13,24 +13,58 @@ jg doctor
 jg "How are telemetry events recorded and sent?" ./my-project
 ```
 
-`auth` asks for Vercel AI Gateway, TypeSafe, OpenRouter, or Cloudflare AI Gateway, then saves its key in
-an owner-only config file. Searches use that provider until you run auth again.
-`doctor` verifies access with synthetic input and names the selected provider.
+`auth` asks you to choose a provider or a custom endpoint, then saves its key in an
+owner-only config file. Run `jg --help` for the supported provider names. Searches
+use that provider until you run auth again.
+`doctor` verifies access with synthetic input and names the selected provider or
+endpoint host.
+When the provider rejects the request, doctor reports the HTTP status and its
+error message, when available. A working key can still lack model access or paid
+credits; follow the provider’s explanation before replacing the key. Saved keys
+and raw response bodies are excluded from diagnostic output. If a provider echoes
+a key with inserted separators, its message is omitted.
 For unattended setup, pipe the key from your secret manager to:
 
 ```sh
-jg auth --provider openrouter --stdin
+jg auth --provider opencode --stdin
 ```
 
-Both options are required for piped setup. Cloudflare AI Gateway also needs your
-gateway URL, saved with the token: either
-`https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY` or the gateway's custom domain.
-The token needs the account's AI Gateway Run permission; Jev is billed through
-Cloudflare Unified Billing and served on the gateway's Workers AI route.
+Both options are required for piped setup. To send traffic through your own
+TypeSafe-compatible gateway, choose “Custom endpoint” in `auth` and enter its base
+URL and model ID, or pass both explicitly:
 
 ```sh
-jg auth --provider cloudflare --gateway-url https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY --stdin
+jg auth --provider custom --base-url https://gateway.example.com/typesafe/v1 --model gateway/jev-2 --stdin
 ```
+
+Custom endpoints must use `https://`; `http://localhost` and `http://127.0.0.1`
+are accepted for a local proxy. Auth and doctor name only the endpoint host, never
+the key. The saved endpoint and model are part of the cache identity, so custom
+answers stay separate from the preset providers’ answers and from other endpoints.
+
+A custom base URL must contain only the scheme, host, and optional path: no
+embedded credentials, query string, or fragment. Jevgrep appends `/systemone` to
+that base URL and sends the saved key as a Bearer token.
+
+For gateway implementers, Jevgrep's boolean questions arrive as `noul` questions
+**without `criteria`**. A minimal request and response are:
+
+```json
+{
+  "model": "your-model",
+  "state": "source context",
+  "questions": { "q": { "type": "noul", "instructions": "Relevant?" } }
+}
+```
+
+```json
+{ "answers": { "q": { "type": "noul", "noul": 0.9 } } }
+```
+
+Return an answer for every question ID, with a finite `noul` value between 0 and 1.
+These answers need neither `probabilities` nor `confidence`. A server that demands
+`criteria.true` and returns HTTP 422 is incompatible with these requests. Run
+`jg doctor` against a custom gateway before searching a repository.
 
 Credentials are saved under
 `$XDG_CONFIG_HOME/jevgrep/credentials.json`, or `~/.config/jevgrep/credentials.json`.
@@ -38,7 +72,23 @@ Existing saved records without a provider still mean Vercel, without a migration
 API-key, endpoint, and model environment overrides are ignored; users who only
 configured an environment key must run auth. There is no automatic fallback or
 per-search provider override. Searches send eligible source to the saved service.
+Run `jg files ./project` first to see how many files and bytes that root makes
+eligible and how many paths each filter skips; it needs no key and sends nothing.
 Evaluation answers are cached locally; `jg --help` describes cache controls.
+
+For a slow or unstable connection, try `jg "question" ./project --concurrency 4`
+(or `1` to serialize requests). The default limit is 32 across all search stages,
+including retries. Waiting for a slot does not consume the request timeout, and
+queued source is revalidated before upload. This controls transport pressure,
+not relevance thresholds or cache identity.
+
+An incomplete search reports one sanitized, unrecovered provider error alongside
+its issue counts, distinguishing HTTP failures, timeouts, and connection failures.
+A batch failure that recovers through splitting is not used as the diagnostic. The
+reported concurrency limit helps tune the next run. Only validated evaluation
+answers are cached: provider errors and the final search result are never stored.
+Rerunning after the connection recovers retries failed work while reusing valid
+answers; `--no-cache` additionally bypasses those valid cached answers.
 
 The summary comes first, followed by file and declaration locations and selected
 source. Locations are reading leads, not a checklist. Omitted excerpts are marked;

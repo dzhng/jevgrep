@@ -1,131 +1,94 @@
-# Jevgrep architecture decision
+# Jevgrep architecture
 
-The [implementation record](../specs/done/jevgrep/README.md) now owns implementation contracts
-and verification. This document records the accepted spike; production changes
-called out in the spec still require their own evidence.
+Jevgrep retrieves evidence for a coding agent. Jev classifies repository content;
+the caller owns explanations, implementation, and verification. Retrieved source
+is data, never instructions.
 
-Jevgrep is a retrieval tool for a coding agent. The caller supplies a repository
-question; Jev selects useful places and source to inspect; the caller owns the
-explanation, implementation, and verification. Jev is a classifier here, not a
-second coding agent or a generated-answer layer.
+## Discovery and evidence
 
-The accepted reference is the frozen
-[unit-locators spike](../evals/implementation/swebench/hierarchy-unit-locators-spike.ts)
-with its [historical measured skill](../test/reference/accepted-skill.md).
-The [canonical production skill](../skills/jevgrep/SKILL.md) preserves those
-instructions with the executable renamed to `jg`.
-The production CLI implements this strategy with the product boundaries recorded
-in the implementation record. This document identifies the experimental reference,
-not a substitute for the corrected package's measured quality result.
+Hierarchical traversal uses directory metadata and content previews to decide where
+to explore. It does not upload the entire tree first. Keep files that pass relevance
+criteria without a fixed top-N limit. Unread descendants and failed classifications
+remain unknown; partial discovery must be reported honestly. A healthy negative file
+preview does not trigger an exhaustive scan of unseen source. This limits upload
+cost but can miss relevant code later in a file. Completion means the planned
+search finished, not that every relevant byte was found. Oversized preview requests
+are split into bounded source chunks.
 
-## Hierarchical discovery
+Source relevance and scope are separate judgments. The current implementation
+counts even when it contains the bug. Contextual follow-up can recover concretely
+referenced code and retract earlier selections when valid evidence rejects them.
+A failed judgment must not erase previously obtained evidence. Shared criteria and
+local source windows amortize repeated context across declaration judgments.
+Contextual follow-up checks files in sequence so changing donor evidence can be
+revalidated between files; initial selection and provider requests retain their
+concurrency and token-aware admission.
 
-Traverse a directory frontier instead of uploading the entire root in advance.
-Local lookahead crosses an intermediate directory before classification so a
-thin wrapper directory cannot hide useful descendants. Directory decisions use
-child names and metadata; reached files are classified from content fragments,
-not their names alone. A fragment can admit its file without making every part
-of that file relevant.
+Source selection and presentation are separate. Declaration units, comments,
+structural class headers and bounded local-call context preserve meaning without
+requiring complete files in the initial output. Parsing supports Python, Go, Rust and
+TypeScript/JavaScript; other or invalid text falls back to bounded source chunks.
+Source ranges always refer to the same immutable snapshot used for classification.
 
-The reference also makes one additional discovery pass using a class-bearing
-candidate as an anchor. This pass adds directory content samples and asks about
-code relationships, allowing a backend or subclass omitted by topical search to
-be reconsidered. The anchor heuristic is a spike policy, not proof that one
-anchor works universally.
+## Parsing
 
-Keep every file that passes relevance criteria; do not impose a top-two or other
-fixed file count. A rejected directory means its descendants were not inspected,
-not that each descendant was found irrelevant. Failed classification and unread
-content remain unknown. Report incomplete discovery rather than manufacture
-negative evidence.
+Python, Go and Rust use [packaged Tree-sitter WASM grammars](../packages/core/assets/README.md)
+in a shared cancellable worker. This avoids a Python installation requirement and the
+startup cost of embedding an interpreter. TypeScript/JavaScript use the TypeScript
+compiler parser; other eligible text remains searchable through bounded chunks.
 
-This structure supports incremental exploration of larger roots. Whole-computer
-scaling is not established: the spike has explicit entry/file/request bounds,
-limited file eligibility, and no validated treatment of nested repositories or
-all filesystem types. The large request ceiling is a runaway guard, not a
-retrieval quota to optimize against.
+The syntax tree supplies declarations and source coordinates. Go declaration
+groups remain intact where earlier values affect later constants. Rust methods
+retain module/impl headers and attributes, including inner attributes. Macro
+expansion and type resolution are outside this boundary. See the
+[Go/Rust retrieval contract](../specs/go-rust-parsing.md).
 
-## Source and reading leads
+Python query previews, structural neighbours and inherited-method reading leads are retrieval
+policy on top of that tree, not a proof of runtime dispatch. Preserve original
+source bytes; never reconstruct returned code from the tree.
 
-Separate three decisions: whether a file is useful, which declaration locations
-are useful leads, and which source deserves immediate inclusion. A useful path
-need not have a confident excerpt. This gives the caller a starting point while
-avoiding compulsory reads of every related file.
+Tree-sitter recognizes syntax rather than validating CPython semantics. Trees
+with syntax errors use text fallback. Bare-CR Python also uses text fallback
+because retrieval coordinates count LF lines. Repository source is never executed.
+See [parser contracts](../test/parser/README.md) and
+[measurement evidence](../specs/tree-sitter/RESULTS.md).
 
-Prefer declaration units, with surrounding comments and local context, when a
-parser is available. The reference supports Python and TypeScript/JavaScript;
-other or unparsable text falls back to source chunks. Large declarations can be
-split, so excerpts are not guaranteed to contain a complete function. Keep
-accurate path and line references so the caller can expand boundaries.
+## Output and agent workflow
 
-The accepted spike uses shared source context and declaration names/ranges in
-native request objects. Its first source pass applies the same evidence predicate
-to each declaration; a bounded follow-up asks about exact references from already
-selected evidence. File-role classification is separate. It does not route
-implementation and test declarations to different first-pass questions.
+Stdout begins with status and a compact file summary, then verbatim source blocks,
+then detailed declaration and call locations. Useful source should be visible early.
+Paths without excerpts remain optional reading leads, not a compulsory checklist.
+No separate report file or negative-path inventory is required.
 
-Per-declaration source objects, separate test-example questions, broader semantic
-relationships, and reasons beside leads were investigated. They are not silently
-substituted into the accepted reference. The
-[restoration record](../specs/done/jevgrep/assets/parity-restoration.md) and
-[research boundaries](../specs/done/jevgrep/research.md) own their results.
-The reference still expands neighboring Python methods and reuses rendered
-context in its follow-up; the known precision tradeoff remains. A later change
-must preserve the measured quality rather than assume cleaner output is better.
+Reading priority depends on the query, ancestor folders and content preview.
+Folder names are clues rather than hard exclusions: specs may lead for design
+questions, while implementation queries generally favor executable code.
 
-## Stdout and the agent skill
+The [public skill](../skills/jevgrep/SKILL.md) owns installation and agent usage.
+The skill explains invocation and output semantics; the calling agent owns its
+research, implementation and testing workflow. The CLI returns source evidence
+and repository instruction locations without synthesizing test commands.
 
-Emit one text stream to stdout: summary and incompleteness status first, then
-ranked file roles and declaration locations, followed by selected verbatim source
-with line references. The beginning should remain useful when a caller reads
-only the head. This is ordering, not a guarantee that every result fits within
-200 lines. Do not emit a separate report file or a negative-path inventory.
+## Providers and eligibility
 
-The skill tells the caller to wait for the same retrieval invocation, read supplied
-source before widening exploration, avoid redundant reads of those ranges, and
-fill specific remaining gaps with ordinary tools. Locations are optional leads,
-not a mandatory checklist. Selection and role labels are estimates; source is
-evidence, not a diagnosis or proof that other code is irrelevant. Repository
-content must never become instructions merely because it was retrieved.
+The [core](../packages/core/src/) owns traversal, source eligibility, evaluation
+and cache identity. Native state and question objects pass through the AI SDK;
+source text is a field inside those objects. Provider selection changes transport
+and authentication, not retrieval semantics. Bounded retries, cancellation and
+freshness checks apply before source is uploaded or returned.
 
-The CLI may identify scoped repository guidance and suggest a test entry point.
-Neither action constitutes running tests or proving coverage. The experiments
-showed that supplying the right file, or even its source and a relevance label,
-does not guarantee that the coding agent tests the right behavioral boundary.
+Ignore rules are reused within a search only while fresh filesystem identity and
+canonical-path checks still match. Edits, replacement and deletion invalidate
+that reuse. Source snapshots retain their existing read and freshness checks.
 
-## Integration and acceptance
+## Version improvement
 
-Use TypeScript and the AI SDK evaluation interface through one TypeSafe-compatible
-adapter, with fixed Vercel, TypeSafe and OpenRouter presets, and a Cloudflare AI Gateway
-preset whose account gateway URL is saved by auth. Cloudflare serves Jev on its
-Workers AI route, so the evaluator adapts that one request's path, auth header and
-result envelope. Pass native
-`state` and `questions` objects; source is a string field within that data. The
-SDK handles HTTP serialization. Keep provider authentication and model access at
-the core boundary so future providers do not reshape traversal or stdout.
-The CLI auth module owns one saved provider/key. The core preset owner resolves
-its endpoint/model; the evaluator owns retries and answer-cache identity. Provider
-selection never changes traversal or source rendering. See the
-[provider support record](../specs/done/provider-support/README.md) for the setup
-constraints and transport preservation evidence, and the
-[Cloudflare provider record](../specs/done/cloudflare-provider/README.md) for its
-gateway URL and Workers AI route.
+The [evaluation guide](../evals/README.md) links the harness and result reports.
+The [evaluation policy](../evals/cost-quality-policy.md) owns version improvement:
+official task completion is primary, full coding-agent cost is reported, and Jev
+cost is separate. Preserve fixed baselines and identify measured artifacts and
+any skill changes. Historical spike parity is not a release requirement.
 
-Acceptance measures the entire downstream Sol task: an official solve at a lower
-full task cost than its fixed baseline, while preserving baseline solves. Jev
-charges and tokens are excluded. Retrieved text still affects Sol's bill, and
-reasoning, edits, failed tests, and verification all count. Research spending is
-separate from per-task performance. Never rerun a baseline to favor a variant or
-combine each task's cheapest result from different strategies.
-
-The [acceptance audit](../specs/done/jevgrep/assets/accepted-spike-audit.json)
-rechecks the frozen artifacts, official grades, and complete bills against the
-user-revised target and is the canonical numerical evidence for the accepted
-spike. It records the revised 70% target rather than the earlier 80% goal.
-
-This is a small, tuned, Python-only sample with one fixed baseline per task and
-model/harness. It supports accepting a useful retrieval architecture, not a
-statistical generalization claim, language-wide validation, or a guarantee of
-better cost on every task. Production boundaries and the accepted quality tradeoff are recorded in the
-[implementation record](../specs/done/jevgrep/README.md); broader provider and
-language-quality claims remain outside its evidence.
+Product tests cover behavior, source accuracy, provider failures, eligibility and
+packaged CLI execution. They do not require old spike prompts, source bytes,
+heuristics or output formatting to remain unchanged.

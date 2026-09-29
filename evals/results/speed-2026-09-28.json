@@ -1,0 +1,302 @@
+{
+  "package_sha256": "8d2f8ad8f15b046cd45479d15e34a4e62db8fb37e8c1df9aeb9bf87a7527af0e",
+  "completed": 10,
+  "solves": 8,
+  "pending": [],
+  "rows": [
+    {
+      "study": "single-validation-xarray",
+      "task": "pydata__xarray-3305",
+      "official_resolved": true,
+      "candidate": {
+        "wall_seconds": 245.48427745798836,
+        "sol_cost_usd": 0.3239844,
+        "sol_tokens": 304403
+      },
+      "previous": {
+        "wall_seconds": 300.1971882499638,
+        "sol_cost_usd": 0.35288200000000003,
+        "sol_tokens": 358775
+      },
+      "baseline": {
+        "wall_seconds": 118.45186395899509,
+        "sol_cost_usd": 0.4937066,
+        "sol_tokens": 602142
+      },
+      "evidence": "evals/runs/swebench/speed-research/single-validation-xarray/attempts/pydata__xarray-3305",
+      "artifact_sha256": {
+        "receipt.json": "3d61d7c40edc78df87b5cf749a81579f4e3766e285d5906524ce32cd531dee20",
+        "grading-receipt.json": "510d3d8d83421088dc5c1dd0f31a50d8f7e5489dfe5f432a67cd9aea0d4a26d3",
+        "generation-accounting.json": "bc59de6bfe47ed670835ecc0747af85eef8ef395b120cda87a18fe5a536b18fe",
+        "agent.patch": "d56546a6af80e05c82f296e5e7da31cd3c90083419f384c6189c386f949dfdee"
+      }
+    },
+    {
+      "study": "single-validation-sphinx",
+      "task": "sphinx-doc__sphinx-8638",
+      "official_resolved": true,
+      "candidate": {
+        "wall_seconds": 172.56750995799666,
+        "sol_cost_usd": 0.7740684,
+        "sol_tokens": 822006
+      },
+      "previous": {
+        "wall_seconds": 545.2917012500111,
+        "sol_cost_usd": 0.7048812,
+        "sol_tokens": 812374
+      },
+      "baseline": {
+        "wall_seconds": 192.01333883299958,
+        "sol_cost_usd": 1.0594724,
+        "sol_tokens": 1396272
+      },
+      "evidence": "evals/runs/swebench/speed-research/single-validation-sphinx/attempts/sphinx-doc__sphinx-8638",
+      "artifact_sha256": {
+        "receipt.json": "efa7355d2f62db19390d0921a70f7efe43183fedeed2010dd15ac3cadd8d1158",
+        "grading-receipt.json": "f271101d6e4f5f38c725c37d8154d9a7c7044b37caa8bed4e07e41dd684f2388",
+        "generation-accounting.json": "ca4f608ea22df3e3d04f22f716accc26b287690c7986066ad41179b722a30460",
+        "agent.patch": "3a8b0160895d51be062e751c668d0c0b96d3b6fb2e37a78ec5346713f7db7a61"
+      }
+    },
+    {
+      "study": "single-validation-scikit",
+      "task": "scikit-learn__scikit-learn-13124",
+      "official_resolved": true,
+      "candidate": {
+        "wall_seconds": 78.83385858300608,
+        "sol_cost_usd": 0.24722080000000002,
+        "sol_tokens": 210332
+      },
+      "previous": {
+        "wall_seconds": 119.97234287502943,
+        "sol_cost_usd": 0.2640736,
+        "sol_tokens": 187943
+      },
+      "baseline": {
+        "wall_seconds": 86.36477591699804,
+        "sol_cost_usd": 0.29443600000000003,
+        "sol_tokens": 271366
+      },
+      "evidence": "evals/runs/swebench/speed-research/single-validation-scikit/attempts/scikit-learn__scikit-learn-13124",
+      "artifact_sha256": {
+        "receipt.json": "2b6735f8b3adf6e15443c25d207d10a8355065f1df25463c5781355f52df35f0",
+        "grading-receipt.json": "ac76aa012535dda39909fe2d4822c9d66a4480bf815bf5343edd8564d6d5c9b2",
+        "generation-accounting.json": "c938c3209c001e8fcfb58e5506d3c69089b2283e342629aded6f9acff66fb323",
+        "agent.patch": "0affb6b2e5d742d30525c4d19e21ac1e50fcc34601f1e5ac6d5f1810be37073c"
+      }
+    },
+    {
+      "study": "single-validation-django",
+      "task": "django__django-15629",
+      "official_resolved": true,
+      "candidate": {
+        "wall_seconds": 311.91485104197636,
+        "sol_cost_usd": 1.1819994,
+        "sol_tokens": 1408378
+      },
+      "previous": {
+        "wall_seconds": 408.7809627909446,
+        "sol_cost_usd": 1.2286352,
+        "sol_tokens": 1492745
+      },
+      "baseline": {
+        "wall_seconds": 402.324371292023,
+        "sol_cost_usd": 1.5055472,
+        "sol_tokens": 2060603
+      },
+      "evidence": "evals/runs/swebench/speed-research/single-validation-django/attempts/django__django-15629",
+      "artifact_sha256": {
+        "receipt.json": "c5cd851610e14b4934a4ace619baeaa03f10ed100ac2c612aead30880678f0c5",
+        "grading-receipt.json": "73d02f1bfcd51d86f4ee75e86a62d7a76ae67a5e22eda5339e34ba7367fad0bb",
+        "generation-accounting.json": "502f886553f59f4b98ffc06507cf91c47b4160dc43aaef04290405c567c7f502",
+        "agent.patch": "2c140d3673321c4fd6ef632374127faa955711c9ba039e6dcb5580dfdcd8b691"
+      }
+    },
+    {
+      "study": "single-validation-requests",
+      "task": "psf__requests-1142",
+      "official_resolved": true,
+      "candidate": {
+        "wall_seconds": 142.6549362919759,
+        "sol_cost_usd": 0.4151056,
+        "sol_tokens": 472718
+      },
+      "previous": {
+        "wall_seconds": 87.99161604198162,
+        "sol_cost_usd": 0.2915148,
+        "sol_tokens": 224013
+      },
+      "baseline": {
+        "wall_seconds": 139.47062074998394,
+        "sol_cost_usd": 0.2685004,
+        "sol_tokens": 206136
+      },
+      "evidence": "evals/runs/swebench/speed-research/single-validation-requests/attempts/psf__requests-1142",
+      "artifact_sha256": {
+        "receipt.json": "e7626505e5b583639fbb7da60e1ca4c4828c2380ea069020c0649cf0cdd10fbe",
+        "grading-receipt.json": "4fbb36298a58ded599c7afffdff59d3ef127da763c25ec81d84f7c49f5623f7c",
+        "generation-accounting.json": "ffac9e44ba915a212a3b83d2097a959228831a6dfe5c4ad1fbbcea622aef9e91",
+        "agent.patch": "98d0173f891449f78c889e6d688b13b8dec31ef4682b21c0cf2a83bd9d4703b0"
+      }
+    },
+    {
+      "study": "single-validation-astropy",
+      "task": "astropy__astropy-13579",
+      "official_resolved": true,
+      "candidate": {
+        "wall_seconds": 207.9371116249822,
+        "sol_cost_usd": 0.4576928,
+        "sol_tokens": 444882
+      },
+      "previous": {
+        "wall_seconds": 232.20947712502675,
+        "sol_cost_usd": 0.4585834,
+        "sol_tokens": 399453
+      },
+      "baseline": {
+        "wall_seconds": 127.74519329200848,
+        "sol_cost_usd": 0.428631,
+        "sol_tokens": 406770
+      },
+      "evidence": "evals/runs/swebench/speed-research/single-validation-astropy/attempts/astropy__astropy-13579",
+      "artifact_sha256": {
+        "receipt.json": "d31a8837972f8fab493c6e8527997f11bdaca7b4d6854737d7dbecca923fe563",
+        "grading-receipt.json": "8e5f42338ddf521ef02d509200a981db973931c55027e7ad9b38976afa2db22c",
+        "generation-accounting.json": "0f2de0ce3fc1367d526747f06c427a91a90123810486b304c64a5d6da017d35a",
+        "agent.patch": "2e487b531c86451f5d13a552319820b86bd47f43dcb29191e9274226a33ee8da"
+      }
+    },
+    {
+      "study": "single-validation-pytest",
+      "task": "pytest-dev__pytest-6197",
+      "official_resolved": true,
+      "candidate": {
+        "wall_seconds": 237.44561316701584,
+        "sol_cost_usd": 0.8906638,
+        "sol_tokens": 1077999
+      },
+      "previous": {
+        "wall_seconds": 260.03042308299337,
+        "sol_cost_usd": 0.8280682,
+        "sol_tokens": 967037
+      },
+      "baseline": {
+        "wall_seconds": 596.4330365410133,
+        "sol_cost_usd": 2.344458,
+        "sol_tokens": 3660298
+      },
+      "evidence": "evals/runs/swebench/speed-research/single-validation-pytest/attempts/pytest-dev__pytest-6197",
+      "artifact_sha256": {
+        "receipt.json": "fcba035545c3259d926380823a7dc5890da53abe630654adf47de07d0f9d550c",
+        "grading-receipt.json": "1c65251054cbfaf602a57212ff02bb5006542967d2636181822225fc59d65bfd",
+        "generation-accounting.json": "53c276230b43c619d77f14aa63a808bb13d5bc3907aa31525dde54e1ebbcb540",
+        "agent.patch": "be29ef72cc0e7464f18a9a6a570bcc24b637f4c96cfe9d1452fe03f64e210e27"
+      }
+    },
+    {
+      "study": "single-validation-sympy",
+      "task": "sympy__sympy-16792",
+      "official_resolved": true,
+      "candidate": {
+        "wall_seconds": 116.85864991595736,
+        "sol_cost_usd": 0.2960334,
+        "sol_tokens": 263652
+      },
+      "previous": {
+        "wall_seconds": 178.82062245899579,
+        "sol_cost_usd": 0.5612792,
+        "sol_tokens": 621998
+      },
+      "baseline": {
+        "wall_seconds": 386.5954145830183,
+        "sol_cost_usd": 0.547975,
+        "sol_tokens": 689425
+      },
+      "evidence": "evals/runs/swebench/speed-research/single-validation-sympy/attempts/sympy__sympy-16792",
+      "artifact_sha256": {
+        "receipt.json": "d41310764641247124861bdfd91961a5bd17df5a30cb7cb5975f6f3e2d4a1b44",
+        "grading-receipt.json": "4c25e982c931eb1e06688f0f469eaad0d494132472edeb676b18d92bb30caa80",
+        "generation-accounting.json": "c66cca2b4a78673c211325afa00076766dc52868bb75fc9e773df6d7ced4ca4c",
+        "agent.patch": "d66b5b38cca85f5b688dbee91e367dc4b3eed5fb374da115101900e2abc1ae0b"
+      }
+    },
+    {
+      "study": "single-validation-matplotlib",
+      "task": "matplotlib__matplotlib-26466",
+      "official_resolved": false,
+      "candidate": {
+        "wall_seconds": 290.0717128330143,
+        "sol_cost_usd": 0.3605752,
+        "sol_tokens": 379539
+      },
+      "previous": {
+        "wall_seconds": 289.18520695803454,
+        "sol_cost_usd": 0.2637272,
+        "sol_tokens": 209488
+      },
+      "baseline": {
+        "wall_seconds": 106.53679849999025,
+        "sol_cost_usd": 0.395716,
+        "sol_tokens": 371885
+      },
+      "evidence": "evals/runs/swebench/speed-research/single-validation-matplotlib/attempts/matplotlib__matplotlib-26466",
+      "artifact_sha256": {
+        "receipt.json": "0061b834d70f8693613942c7af0b402df82ca638efebb777a5ede9c07d5fdda4",
+        "grading-receipt.json": "8b7f91e6270f37d9503017be97f85b974aadfda152784c7a58e6e2ac4c42e489",
+        "generation-accounting.json": "a76df7d8e6767ac4f276a74fb0444d44c48c4134b7f7223a5fcd32f9af501eb5",
+        "agent.patch": "aa1d1b719abaf1cf5db5534b552881b01d6dd2b50329e50a50ac65a38623aa26"
+      }
+    },
+    {
+      "study": "single-validation-pylint",
+      "task": "pylint-dev__pylint-4604",
+      "official_resolved": false,
+      "candidate": {
+        "wall_seconds": 143.46947737503797,
+        "sol_cost_usd": 0.3906136,
+        "sol_tokens": 426375
+      },
+      "previous": {
+        "wall_seconds": 326.4146437079762,
+        "sol_cost_usd": 0.4860082,
+        "sol_tokens": 593103
+      },
+      "baseline": {
+        "wall_seconds": 74.52734654099913,
+        "sol_cost_usd": 0.2836264,
+        "sol_tokens": 268533
+      },
+      "evidence": "evals/runs/swebench/speed-research/single-validation-pylint/attempts/pylint-dev__pylint-4604",
+      "artifact_sha256": {
+        "receipt.json": "3fac92fcb08779e12e20622fdbeb551b82074641293a936ec73cc287b7ad120b",
+        "grading-receipt.json": "a0eef6942dbaa5b1316c5c6cfbbbd98ba8d60d04dfc3b77f8b1b0bb6b89992a9",
+        "generation-accounting.json": "0ef382029841b2dc13b54a80699cbab1aaa74fea96b54a4463edca1698ab6c86",
+        "agent.patch": "8d471bbdd5eca8bcaf8503a41799cb2fefab6e210214c66752efb5fe1f56a3ae"
+      }
+    }
+  ],
+  "totals": {
+    "candidate": {
+      "wall_seconds": 1947.237998248951,
+      "sol_cost_usd": 5.3379574000000005,
+      "sol_tokens": 5810284
+    },
+    "previous": {
+      "wall_seconds": 2748.894184540957,
+      "sol_cost_usd": 5.439653,
+      "sol_tokens": 5866929
+    },
+    "baseline": {
+      "wall_seconds": 2230.462760208029,
+      "sol_cost_usd": 7.622069,
+      "sol_tokens": 9933430
+    }
+  },
+  "limitations": "One first attempt per tuned Python task, not a holdout or variance estimate. Sol cost and input+output tokens exclude Jev. Native TypeSafe routing and local implementation changes were evaluated together; no isolated causal attribution.",
+  "model": "openai/gpt-5.6-sol",
+  "effort": "medium",
+  "jev_provider": "typesafe",
+  "public_skill_sha256": "04d4d7b59d122799a863bc399234de171bdb087436075be52ebf3bece1bf3e44",
+  "candidate_description": "v0.4.2 plus native binary scan and one source validation per transport attempt/cache return; no lazy-preview change",
+  "jev_api_cost": "Unknown: native responses have no price metadata. Excluded from scored cost, not assumed zero."
+}

@@ -1,12 +1,14 @@
-import { chmod, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { bundledNotices, pythonRuntimeNotices } from "./package-notices.mjs";
+import { grammarAssets } from "./parser-assets.mjs";
+
+import { bundledNotices } from "./package-notices.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const out = join(root, "apps/cli/dist");
-const metadata = JSON.parse(await readFile(join(root, "apps/cli/package.json"), "utf8"));
+const grammarNotices = await grammarAssets(root, true);
 await rm(out, { recursive: true, force: true });
 await mkdir(join(out, "bin"), { recursive: true });
 const build = await Bun.build({
@@ -15,16 +17,16 @@ const build = await Bun.build({
   target: "node",
   format: "esm",
   metafile: true,
-  external: ["pyodide", "typescript"],
+  external: ["web-tree-sitter", "typescript"],
 });
 if (!build.success) throw new AggregateError(build.logs, "CLI build failed");
 await chmod(join(out, "bin/index.js"), 0o755);
 await writeFile(
   join(out, "THIRD_PARTY_NOTICES.txt"),
-  (await bundledNotices(build.metafile!, process.cwd())) +
-    (await pythonRuntimeNotices(metadata.dependencies.pyodide)),
+  (await bundledNotices(build.metafile!, process.cwd())) + grammarNotices,
 );
-await cp(join(root, "packages/core/src/python-worker.mjs"), join(out, "bin/python-worker.mjs"));
+for (const name of ["parser-worker", "parser-helpers", "parser-preview", "parser-declarations"])
+  await cp(join(root, `packages/core/src/${name}.mjs`), join(out, `bin/${name}.mjs`));
 await cp(join(root, "LICENSE"), join(out, "LICENSE"));
 await cp(join(root, "packages/core/assets"), join(out, "assets"), { recursive: true });
 const skill = join(out, "skills/jevgrep/SKILL.md");

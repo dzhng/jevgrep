@@ -4,18 +4,20 @@ import { type EvaluationRequest, EvaluationFailure } from "./evaluator";
 import { inspect, pythonPreview, sourceForUnit, splitSource } from "./source";
 import {
   navigationRequest,
-  roleRequest,
+  fileAssessmentRequest,
   type DirectoryPreview,
   type FilePreview,
   type NavigationItem,
   type Evidence,
 } from "./requests";
 import { selectFile, type SelectionResult } from "./selection";
+import { localCallContext } from "./call-context";
+import { selectTestBodies } from "./test-body-selection";
 import { repositoryContext } from "./repository-context";
 import type { Evaluator, FileEvidence, RetrievalResult, SearchInput } from "./types";
 
-// Provider calls dominate wall time; each stage keeps this many in flight.
-const concurrency = 32;
+// Bound per-stage source work; the evaluator separately caps shared provider attempts.
+const stageWorkers = 32;
 /** Traversal owns admission; every stage reads through the same eligibility policy. */
 export async function retrieve(input: SearchInput, evaluator: Evaluator): Promise<RetrievalResult> {
   const reader = await createFilesystem({
@@ -25,6 +27,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     protectedPaths: input.protectedPaths,
   });
   const issues = new Map<string, number>();
+  let providerFailure: string | undefined;
   const inspected = new Set<string>();
   const candidates = new Map<string, { path: string; contentHash: string; score: number }>();
   const files = new Map<string, FileEvidence>();
@@ -54,13 +57,12 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       validationQueue = pending.catch(() => {});
       return pending;
     };
-    // Preserve queued request order while checks perform I/O; provider work stays concurrent.
-    await beforeAttempt();
     return evaluator.evaluate(request, { navigation, beforeAttempt });
   }
   let entriesSeen = 0;
   let stop = false;
-  function issue(kind: string, count = 1) {
+  function issue(kind: string, count = 1, message?: string) {
+    if (kind === "provider") providerFailure ??= message;
     issues.set(kind, (issues.get(kind) ?? 0) + count);
     if (["authentication", "request-limit", "cancelled", "interrupted"].includes(kind)) stop = true;
   }
@@ -117,7 +119,11 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
           const middle = Math.ceil(group.length / 2);
           batches.push(group.slice(0, middle), group.slice(middle));
         } else if (!(error instanceof EvaluationFailure && error.kind === "source-invalid"))
-          issue(error instanceof EvaluationFailure ? error.kind : "provider");
+          issue(
+            error instanceof EvaluationFailure ? error.kind : "provider",
+            1,
+            error instanceof EvaluationFailure ? error.message : undefined,
+          );
       }
     }
     // Failed groups append their halves to the same queue. A recovered parent is
@@ -127,7 +133,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       let rejected = false;
       function pump() {
         if (rejected) return;
-        while (active < concurrency && batches.length && !stop && !input.signal.aborted) {
+        while (active < stageWorkers && batches.length && !stop && !input.signal.aborted) {
           const group = batches.shift()!;
           active++;
           scoreGroup(group).then(
@@ -271,7 +277,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     }
     if (
       truncated &&
-      /\.(?:pyi?|[cm]?[jt]s|[jt]sx)$/.test(source.path) &&
+      /\.(?:pyi?|[cm]?[jt]s|[jt]sx|go|rs)$/.test(source.path) &&
       bytes.length <= 1_000_000
     ) {
       const syntax = await inspect(source, {
@@ -346,35 +352,57 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
               items.push(buffered({ path: entry.path, kind: "file", filePreview }, [source]));
               continue;
             }
-            const chunks = splitSource(source, 12_000);
-            for (const chunk of chunks) {
-              const text = sourceForUnit(source, chunk);
-              items.push(
-                buffered(
-                  {
-                    path: entry.path,
-                    kind: "file",
-                    filePreview: {
-                      sizeBytes: Buffer.byteLength(source.source),
-                      extension: extname(entry.path),
-                      text,
-                      previewBytes: Buffer.byteLength(text),
-                      truncated: chunks.length > 1,
-                      range: "sampled source ranges",
-                    },
-                  },
-                  [source],
-                ),
-              );
-            }
+            items.push(buffered({ path: entry.path, kind: "file", filePreview }, [source]));
           }
         }
       }
-      for (const { item, score: probability } of await score(items, anchor)) {
+      const previewsToScore: NavigationItem[] = [];
+      const previewsToExpand: NavigationItem[] = [];
+      for (const item of items) {
+        if (
+          item.kind === "file" &&
+          item.filePreview &&
+          item.filePreview.sizeBytes <= 1_000_000 &&
+          Buffer.byteLength(JSON.stringify(navigationRequest(input.query, [item], anchor))) > 38_000
+        )
+          previewsToExpand.push(item);
+        else previewsToScore.push(item);
+      }
+      const classified = await score(previewsToScore, anchor);
+      const remaining: NavigationItem[] = [];
+      for (const item of previewsToExpand) {
+        const filePreview = item.filePreview!;
+        const source = await unchanged({ path: item.path, contentHash: hashes.get(item.path)! });
+        if (!source) continue;
+        // Requests too large for preview scoring are split into bounded chunks.
+        // Otherwise admission uses the preview; unseen source may still be relevant.
+        for (const chunk of splitSource(source, 12_000)) {
+          const text = sourceForUnit(source, chunk);
+          remaining.push(
+            buffered(
+              {
+                path: item.path,
+                kind: "file",
+                filePreview: {
+                  sizeBytes: filePreview.sizeBytes,
+                  extension: filePreview.extension,
+                  text,
+                  previewBytes: Buffer.byteLength(text),
+                  truncated: true,
+                  range: "sampled source ranges",
+                },
+              },
+              [source],
+            ),
+          );
+        }
+      }
+      classified.push(...(await score(remaining, anchor)));
+      for (const { item, score: probability } of classified) {
         if (item.kind === "directory") {
           if (probability > 0.5) directories.push(item.path);
           else if (!anchor) pruned.set(item.path, item);
-        } else if (probability > 0.25) {
+        } else if (probability > 0.5) {
           const prior = candidates.get(item.path);
           if (!prior || probability > prior.score)
             candidates.set(item.path, {
@@ -405,6 +433,12 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       files.set(candidate.path, {
         ...prior,
         roles: [],
+        priority: undefined,
+        presentationExcerpts: [],
+        selectedPresentationExcerpts: [],
+        callLeads: [],
+        presentationSelected: [],
+        sourceDecisions: [],
         leads: [],
         selected: [],
         rendered: [],
@@ -416,7 +450,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
   async function parallel<T>(items: T[], work: (item: T) => Promise<void>) {
     let next = 0;
     const results = await Promise.allSettled(
-      Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      Array.from({ length: Math.min(stageWorkers, items.length) }, async () => {
         try {
           while (next < items.length && !stop && !input.signal.aborted) await work(items[next++]!);
         } catch (error) {
@@ -481,8 +515,8 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
           excerpts: [],
           sourceOmitted: false,
         });
-      const select = async (evidence?: () => Promise<Evidence[] | undefined>) =>
-        parallel(ordered, async (candidate) => {
+      const select = async (evidence?: () => Promise<Evidence[] | undefined>) => {
+        const selectCandidate = async (candidate: (typeof ordered)[number]) => {
           const source = await unchanged(candidate);
           if (!source) return;
           if (Buffer.byteLength(source.source) > 1_000_000) {
@@ -518,12 +552,20 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
           files.set(candidate.path, selection.file);
           declarations.set(candidate.path, selection.declarations);
           for (const entry of selection.issues)
-            if (entry.kind !== "source-invalid") issue(entry.kind, entry.count);
-        });
+            if (entry.kind !== "source-invalid")
+              issue(entry.kind, entry.count, selection.providerFailure);
+        };
+        if (evidence) {
+          for (const candidate of ordered) {
+            if (stop || input.signal.aborted) break;
+            await selectCandidate(candidate);
+          }
+        } else await parallel(ordered, selectCandidate);
+      };
       const selectEvidence = async () => {
         await select();
         const evidence: Evidence[] = [];
-        // Declaration entries are inserted when selection completes, as in the frozen locations map.
+        // Donors follow selection completion order; concurrent completion can affect request context.
         for (const path of declarations.keys()) {
           const candidate = candidates.get(path)!;
           if (stop || input.signal.aborted) break;
@@ -550,32 +592,106 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
             return fresh.length ? fresh : undefined;
           });
       };
-      // Roles read only the discovery preview, so they classify while evidence is selected.
-      const roles = new Map<string, string[]>();
-      const classifyRoles = () =>
+      // File assessment reads only the discovery preview, so it runs alongside evidence selection.
+      const assessments = new Map<string, { labels: string[]; priority: number }>();
+      const assessFiles = () =>
         parallel(ordered, async (candidate) => {
           const source = await unchanged(candidate);
           if (!source) return;
           const preview = previews.get(candidate.path)!;
           try {
             const scores = await freshEvaluation(
-              roleRequest(input.query, candidate.path, preview),
+              fileAssessmentRequest(input.query, candidate.path, preview),
               [candidate],
             );
-            roles.set(
-              candidate.path,
-              Object.keys(scores).filter((role) => scores[role]! > 0.5),
-            );
+            assessments.set(candidate.path, {
+              labels: Object.keys(scores).filter(
+                (role) => role !== "priority" && scores[role]! > 0.5,
+              ),
+              priority: scores.priority!,
+            });
           } catch (error) {
             if (!(error instanceof EvaluationFailure && error.kind === "source-invalid"))
-              issue(error instanceof EvaluationFailure ? error.kind : "provider");
+              issue(
+                error instanceof EvaluationFailure ? error.kind : "provider",
+                1,
+                error instanceof EvaluationFailure ? error.message : undefined,
+              );
           }
         });
-      await Promise.all([selectEvidence(), classifyRoles()]);
-      // Selection replaces file records, so roles attach after it; invalidated files keep none.
-      for (const [path, fileRoles] of roles) {
+      await Promise.all([selectEvidence(), assessFiles()]);
+      await parallel(ordered, async (candidate) => {
+        const file = files.get(candidate.path);
+        if (!file || file.sourceOmitted) return;
+        const snapshot = await unchanged(candidate);
+        if (!snapshot) return;
+        if (assessments.get(candidate.path)?.labels.includes("test")) {
+          file.presentationExcerpts =
+            file.selectedPresentationExcerpts ?? file.presentationExcerpts;
+          file.presentationSelected = file.selected;
+        }
+        try {
+          const context = await localCallContext(snapshot, file, input.signal);
+          if (context && (await unchanged(candidate)) && files.get(candidate.path) === file)
+            Object.assign(file, context);
+        } catch (error) {
+          if (input.signal.aborted) throw error;
+          // Optional structural context cannot discard already selected evidence.
+          issue("local-call-context");
+        }
+      });
+      // Selection replaces file records, so assessments attach afterward; invalidated files keep none.
+      for (const [path, assessment] of assessments) {
         const file = files.get(path)!;
-        if (!file.sourceOmitted) file.roles = fileRoles;
+        if (!file.sourceOmitted) {
+          file.roles = assessment.labels;
+          file.priority = assessment.priority;
+        }
+      }
+      const testInputs = [];
+      for (const candidate of ordered) {
+        const file = files.get(candidate.path)!;
+        if (file.sourceOmitted || !file.roles.includes("test")) continue;
+        const snapshot = await unchanged(candidate);
+        if (snapshot) testInputs.push({ snapshot, file });
+      }
+      try {
+        const changes = await selectTestBodies(
+          input.query,
+          testInputs,
+          {
+            get requests() {
+              return evaluator.requests;
+            },
+            evaluate: (request) => {
+              const state = request.state as { candidates: Record<string, { path: string }> };
+              return freshEvaluation(
+                request,
+                [...new Set(Object.values(state.candidates).map((c) => c.path))].map(
+                  (path) => candidates.get(path)!,
+                ),
+              );
+            },
+          },
+          input.signal,
+        );
+        let current = true;
+        for (const item of testInputs) {
+          if (
+            !(await unchanged(candidates.get(item.snapshot.path)!)) ||
+            files.get(item.snapshot.path) !== item.file
+          )
+            current = false;
+        }
+        if (current)
+          for (const { file, ...presentation } of changes) Object.assign(file, presentation);
+      } catch (error) {
+        if (input.signal.aborted) throw input.signal.reason;
+        issue(
+          error instanceof EvaluationFailure ? error.kind : "test-body-selection",
+          1,
+          error instanceof EvaluationFailure ? error.message : undefined,
+        );
       }
       if (issues.has("authentication") && !files.size)
         throw new EvaluationFailure("authentication");
@@ -602,10 +718,8 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     const context = await repositoryContext(
       reader,
       sortedCandidates().map((candidate) => files.get(candidate.path)!),
-      declarations,
-      (path) => unchanged(candidates.get(path)!),
     );
-    // Role evaluation may outlive the bytes it classified, for every language.
+    // File assessment may outlive the bytes it classified, for every language.
     for (const candidate of candidates.values()) await unchanged(candidate);
     return {
       root: reader.root,
@@ -615,6 +729,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       repositoryContext: context,
       issues: [...issues].map(([kind, count]) => ({ kind, count })),
       warnings: evaluator.cacheIssues,
+      providerFailure,
       counts: {
         requests: evaluator.requests,
         cacheHits: evaluator.cacheHits ?? 0,
