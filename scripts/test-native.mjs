@@ -80,6 +80,7 @@ try {
       "--prefix",
       prefix,
       "--ignore-scripts",
+      "--offline",
       "--omit=dev",
       "--no-audit",
       "--no-fund",

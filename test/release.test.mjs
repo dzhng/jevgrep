@@ -9,6 +9,7 @@ const metadata = {
   license: "MIT",
   engines: { node: ">=22" },
   dependencies: { typescript: "5.9.3", pyodide: "0.25.1" },
+  bundleDependencies: ["typescript", "pyodide"],
 };
 test("release tags select the authored version and keep prereleases off latest", () => {
   assert.deepEqual(releaseIdentity(metadata, "v1.2.3"), {
@@ -124,11 +125,61 @@ test("archive validation rejects changed skill bytes and accidental source paylo
     "Third-party notices for bundled JavaScript dependencies\n\n=== example@1.0.0 (MIT) ===\nFixture license\n" +
       (await pythonRuntimeNotices("0.25.1")),
   );
+  for (const [name, version] of Object.entries(metadata.dependencies)) {
+    await mkdir(join(pkg, "node_modules", name), { recursive: true });
+    await writeFile(
+      join(pkg, "node_modules", name, "package.json"),
+      JSON.stringify({ name, version }),
+    );
+  }
   const tarball = join(root, "package.tgz"),
     pack = () => execute("tar", ["-czf", tarball, "-C", archiveRoot, "package"]);
   const { validateRelease } = await import("../scripts/validate-release.mjs");
   await pack();
   assert.equal((await validateRelease(tarball, "v1.2.3", root)).version, "1.2.3");
+  await writeFile(
+    join(pkg, "package.json"),
+    JSON.stringify({ ...metadata, bundleDependencies: [...metadata.bundleDependencies].reverse() }),
+  );
+  await pack();
+  assert.equal((await validateRelease(tarball, "v1.2.3", root)).version, "1.2.3");
+  await writeFile(join(pkg, "package.json"), JSON.stringify(metadata));
+  // A newly authored (including scoped) runtime dependency is allowed without
+  // updating a parser-specific archive path list; unrelated payloads are not.
+  const expanded = {
+    ...metadata,
+    dependencies: { ...metadata.dependencies, "@fixture/parser": "1.0.0" },
+    bundleDependencies: [...metadata.bundleDependencies, "@fixture/parser"],
+  };
+  await writeFile(join(root, "apps/cli/package.json"), JSON.stringify(expanded));
+  await writeFile(join(pkg, "package.json"), JSON.stringify(expanded));
+  await mkdir(join(pkg, "node_modules/@fixture/parser"), { recursive: true });
+  await writeFile(
+    join(pkg, "node_modules/@fixture/parser/package.json"),
+    JSON.stringify({ name: "@fixture/parser", version: "1.0.0" }),
+  );
+  await pack();
+  assert.equal((await validateRelease(tarball, "v1.2.3", root)).version, "1.2.3");
+  await mkdir(join(pkg, "node_modules/@fixture/parser-extra"));
+  await writeFile(join(pkg, "node_modules/@fixture/parser-extra/leak.txt"), "not a dependency");
+  await pack();
+  await assert.rejects(validateRelease(tarball, "v1.2.3", root), /Unexpected published file/);
+  await rm(join(pkg, "node_modules/@fixture/parser-extra"), { recursive: true });
+  await writeFile(join(root, "apps/cli/package.json"), JSON.stringify(metadata));
+  await pack();
+  await assert.rejects(validateRelease(tarball, "v1.2.3", root), /Packed runtime dependencies/);
+  await writeFile(join(pkg, "package.json"), JSON.stringify(metadata));
+  await rm(join(pkg, "node_modules/@fixture"), { recursive: true });
+  await writeFile(
+    join(pkg, "node_modules/typescript/package.json"),
+    JSON.stringify({ name: "typescript", version: "0.0.1" }),
+  );
+  await pack();
+  await assert.rejects(validateRelease(tarball, "v1.2.3", root), /differs from release metadata/);
+  await writeFile(
+    join(pkg, "node_modules/typescript/package.json"),
+    JSON.stringify({ name: "typescript", version: metadata.dependencies.typescript }),
+  );
   await writeFile(join(pkg, "dist/bin/python-worker.mjs"), "changed worker");
   await pack();
   await assert.rejects(validateRelease(tarball, "v1.2.3", root), /canonical source/);
@@ -157,7 +208,7 @@ test("archive validation rejects changed skill bytes and accidental source paylo
   await assert.rejects(validateRelease(tarball, "v1.2.3", root), /Unexpected published file/);
 });
 
-test("external Python runtime notices retain conflicting metadata and component provenance", async () => {
+test("bundled Python runtime notices retain conflicting metadata and component provenance", async () => {
   const { pythonRuntimeNotices } = await import("../scripts/package-notices.mjs");
   const notices = await pythonRuntimeNotices("0.25.1");
   assert.match(notices, /Mozilla Public License Version 2.0/);
@@ -166,4 +217,79 @@ test("external Python runtime notices retain conflicting metadata and component 
   assert.match(notices, /github.com\/pyodide\/pyodide\/tree\/0.25.1/);
   assert.match(notices, /Apache License/);
   await assert.rejects(pythonRuntimeNotices("0.26.0"), /Review Python runtime notices/);
+});
+
+test("runtime materialization rejects stale transitives and unsupported graphs before replacing CLI copies", async (t) => {
+  const { mkdtemp, mkdir, readFile, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { bundleRuntime } = await import("../scripts/runtime-bundle.mjs");
+  const root = await mkdtemp(join(tmpdir(), "jg-runtime-tree-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const parser = join(root, "node_modules/parser");
+  const child = join(parser, "node_modules/child");
+  const target = join(root, "cli/node_modules");
+  await mkdir(child, { recursive: true });
+  await writeFile(join(root, "package.json"), "{}");
+  const parserMetadata = { name: "parser", version: "1.0.0", dependencies: { child: "^2.0.0" } };
+  const childMetadata = {
+    name: "child",
+    version: "2.1.0",
+    peerDependencies: { accelerator: "*" },
+    peerDependenciesMeta: { accelerator: { optional: true } },
+  };
+  const writeChild = (metadata) => writeFile(join(child, "package.json"), JSON.stringify(metadata));
+  await writeFile(join(parser, "package.json"), JSON.stringify(parserMetadata));
+  await writeFile(join(parser, "index.js"), "parser bytes");
+  await writeFile(join(child, "index.js"), "child bytes");
+  await writeChild(childMetadata);
+  const packages = {
+    parser: ["parser@1.0.0", "", { dependencies: { child: "^2.0.0" } }],
+    child: ["child@2.1.0", "", {}],
+  };
+  const build = () =>
+    bundleRuntime({ parser: "1.0.0" }, join(root, "package.json"), target, packages);
+  await build();
+  assert.equal(
+    await readFile(join(target, "parser/node_modules/child/index.js"), "utf8"),
+    "child bytes",
+  );
+  assert.equal(await readFile(join(target, "parser/index.js"), "utf8"), "parser bytes");
+  await writeFile(join(target, "parser/retained.txt"), "previous successful build");
+
+  for (const [metadata, expected] of [
+    [{ ...childMetadata, version: "2.2.0" }, /does not match bun.lock/],
+    [{ ...childMetadata, optionalDependencies: { extra: "*" } }, /Unsupported optional/],
+    [{ ...childMetadata, peerDependenciesMeta: {} }, /Unsupported required runtime peer/],
+  ]) {
+    await writeChild(metadata);
+    await assert.rejects(build(), expected);
+    assert.equal(
+      await readFile(join(target, "parser/retained.txt"), "utf8"),
+      "previous successful build",
+    );
+  }
+  await writeFile(
+    join(parser, "package.json"),
+    JSON.stringify({ ...parserMetadata, dependencies: {} }),
+  );
+  await assert.rejects(build(), /dependency edges.*do not match bun.lock/);
+  await writeFile(join(parser, "package.json"), JSON.stringify(parserMetadata));
+  await writeChild(childMetadata);
+  packages["another/child"] = ["child@2.2.0", "", {}];
+  await assert.rejects(build(), /does not match bun.lock/);
+  delete packages["another/child"];
+  await writeChild({ ...childMetadata, dependencies: { parser: "1.0.0" } });
+  packages.child[2] = { dependencies: { parser: "1.0.0" } };
+  await assert.rejects(build(), /Cyclic runtime dependency/);
+  packages.child[2] = {};
+  await writeChild(childMetadata);
+
+  // Resolution may find a previous CLI copy on a repeat build. Stage before
+  // replacing it so the materializer never removes its own input.
+  await bundleRuntime({ parser: "1.0.0" }, join(root, "cli/package.json"), target, packages);
+  assert.equal(
+    await readFile(join(target, "parser/node_modules/child/index.js"), "utf8"),
+    "child bytes",
+  );
 });

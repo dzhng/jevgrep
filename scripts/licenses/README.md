@@ -11,7 +11,7 @@ The notice generator retains package copyright notices and includes these terms
 when emitted dependencies use Apache-2.0. Builds read these retained sources;
 there is no build-time or runtime license download.
 
-## External Python runtime
+## Bundled Python runtime
 
 Pyodide's npm package omits license files and labels itself Apache-2.0, while its
 [tagged upstream license](https://github.com/pyodide/pyodide/blob/0.25.1/LICENSE)
@@ -25,8 +25,8 @@ identifies CPython 3.11.3 and Emscripten 3.1.46; the
 pins libffi and hiwire. Retained license files come from those exact source
 versions. CPython's license documentation preserves its bundled-component
 notices; Emscripten's license and system-library notices preserve the runtime
-terms. The source URLs are maintained with the notice generator. The separately
-installed `base-64` and `ws` packages already carry their own licenses.
+terms. The source URLs are maintained with the notice generator. The bundled
+`base-64` and `ws` packages already carry their own licenses.
 
 Changing the runtime version requires checking these source versions and notices
 again. No license text is downloaded during build or execution.

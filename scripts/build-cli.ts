@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { bundledNotices, pythonRuntimeNotices } from "./package-notices.mjs";
+import { bundleRuntime } from "./runtime-bundle.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const out = join(root, "apps/cli/dist");
@@ -15,7 +16,7 @@ const build = await Bun.build({
   target: "node",
   format: "esm",
   metafile: true,
-  external: ["pyodide", "typescript"],
+  external: Object.keys(metadata.dependencies),
 });
 if (!build.success) throw new AggregateError(build.logs, "CLI build failed");
 await chmod(join(out, "bin/index.js"), 0o755);
@@ -30,3 +31,11 @@ await cp(join(root, "packages/core/assets"), join(out, "assets"), { recursive: t
 const skill = join(out, "skills/jevgrep/SKILL.md");
 await mkdir(dirname(skill), { recursive: true });
 await cp(join(root, "skills/jevgrep/SKILL.md"), skill);
+
+const lock = Bun.JSONC.parse(await readFile(join(root, "bun.lock"), "utf8"));
+await bundleRuntime(
+  metadata.dependencies,
+  join(root, "packages/core/package.json"),
+  join(root, "apps/cli/node_modules"),
+  lock.packages,
+);

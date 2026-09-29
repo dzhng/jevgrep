@@ -39,6 +39,10 @@
     "@types/bun": "catalog:",
     "@types/node": "22.20.4"
   },
+  "bundleDependencies": [
+    "pyodide",
+    "typescript"
+  ],
   "engines": {
     "node": ">=22"
   }

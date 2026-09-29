@@ -29,10 +29,35 @@ is immutable and must not be replaced.
 asset checks. [The build](build-cli.ts) copies the authored MIT license and
 [collects third-party notices](package-notices.mjs) from emitted bundle inputs.
 [Retained license sources](licenses/README.md) document upstream distribution gaps.
-The archive excludes test fixtures, evaluation evidence, node_modules directories, source maps,
+The archive excludes test fixtures, evaluation evidence, development dependencies, source maps,
 and unbundled development source. Authored Python helpers and the Node worker
-are required runtime assets and are included. Direct runtime parser dependencies
-install from exact npm pins; transitive dependencies resolve during npm installation.
+are required runtime assets and are included. Runtime parser dependencies and their transitive dependencies are bundled from
+the frozen Bun installation into the archive. The build materializes private
+copies under the CLI's `node_modules` because npm cannot reliably pack Bun's
+workspace links. This replaces the CLI-local links with ordinary directories;
+it leaves the root Bun store intact. Before copying, the build checks every
+resolved runtime package version and dependency map, including transitives,
+against `bun.lock`.
+A stale copy with a different version fails the build. Run a frozen install
+after dependency changes; version checks do not authenticate locally modified
+files that retain the same version number.
+
+The materializer deliberately supports only one locked version per runtime
+package and ordinary dependencies with optional peers. Cycles, ambiguous locked
+versions, optional dependencies, and required peers fail rather than silently
+producing a partial tree. Package manifests must be resolvable through Node.
+Supporting a new dependency structure requires reviewing the materializer and
+its tests.
+
+A published `npm-shrinkwrap.json` is an alternative for npm 11 consumers, with a smaller archive and no dependency-copying step. However, [npm 12 ignores published shrinkwraps and recommends `bundleDependencies`](https://github.com/npm/cli/blob/latest/docs/lib/content/configuring-npm/package-lock-json.md#npm-shrinkwrapjson). Bundling also permits installation of the tested dependency bytes from an empty cache without network access. The larger archive and materializer are the trade-off.
+
+Installed Docker tests disable network access during npm installation and use an
+empty cache. This ensures consumers receive the runtime dependency bytes that
+were reviewed and tested, without resolving new transitive versions. Dependency
+updates must update `bun.lock` and rerun the build, release validation, and
+installed tests. Bundling moves runtime dependencies from separate npm downloads into the
+Jevgrep archive; archive growth is not all additional download volume. New
+Jevgrep releases are required to deliver dependency security updates.
 
 On an Apple Silicon Mac, run `node scripts/test-native.mjs` after the normal
 `bun install --frozen-lockfile` setup. This builds and packs the candidate, installs
@@ -47,5 +72,4 @@ The installed process receives a PATH containing only Node, so host Python, Bun,
 and compiler installations cannot satisfy runtime dependencies. All fixture
 credentials are synthetic, and local commands must make no Gateway requests.
 This bounded smoke complements the Docker suites; filesystem-policy tests still
-run only in their isolated Docker environment. npm installation needs network
-access to resolve the exact runtime dependencies; search uses only loopback HTTP.
+run only in their isolated Docker environment. npm installation is offline; search uses only loopback HTTP.

@@ -113,11 +113,11 @@ export async function pythonRuntimeNotices(version) {
     ],
   ];
   return (
-    "\nExternal Python runtime notices\n\n" +
-    "Pyodide is installed unmodified as an npm dependency. Its package metadata declares Apache-2.0; " +
+    "\nBundled Python runtime notices\n\n" +
+    "Pyodide is bundled unmodified in this archive. Its package metadata declares Apache-2.0; " +
     "the tagged upstream source is MPL-2.0. This metadata label does not replace the component licenses below. " +
     "Corresponding source (including Pyodide's CPython patches and build configuration) is available at the linked versions. " +
-    "The external base-64 and ws dependencies retain their own installed LICENSE files.\n\n" +
+    "The bundled base-64 and ws dependencies retain their own LICENSE files.\n\n" +
     (
       await Promise.all(
         sources.map(

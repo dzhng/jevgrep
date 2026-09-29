@@ -11,7 +11,7 @@ COPY packages/typescript-config packages/typescript-config
 RUN bun install --frozen-lockfile
 COPY apps/cli apps/cli
 COPY packages/core packages/core
-COPY scripts/build-cli.ts scripts/package-notices.mjs scripts/
+COPY scripts/build-cli.ts scripts/package-notices.mjs scripts/runtime-bundle.mjs scripts/
 COPY scripts/licenses scripts/licenses
 COPY LICENSE LICENSE
 COPY skills skills
@@ -29,7 +29,7 @@ FROM ${PACKAGE_STAGE} AS package
 
 FROM node:22-bookworm-slim AS install
 COPY --from=package /artifacts/jevgrep.tgz /tmp/jevgrep.tgz
-RUN npm install --global --prefix /opt/jevgrep --ignore-scripts --omit=dev /tmp/jevgrep.tgz \
+RUN --network=none npm install --offline --global --prefix /opt/jevgrep --ignore-scripts --omit=dev /tmp/jevgrep.tgz \
     && rm -rf /tmp/jevgrep.tgz /root/.npm
 
 FROM node:22-bookworm-slim AS runtime

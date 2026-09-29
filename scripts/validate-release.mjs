@@ -46,16 +46,6 @@ export async function validateRelease(tarball, tag, root = repository) {
     .split("\n")
     .filter((name) => !name.endsWith("/"));
   if (new Set(files).size !== files.length) throw new Error("Duplicate archive entries");
-  for (const path of files)
-    if (
-      !/^package\/(?:package\.json|README(?:\.md)?|LICENSE|dist\/(?:bin\/(?:index\.js|python-worker\.mjs)|assets\/(?:python\/(?:inspect|preview|neighborhood|calls)\.py|README\.md)|skills\/jevgrep\/SKILL\.md|LICENSE|THIRD_PARTY_NOTICES\.txt))$/.test(
-        path,
-      )
-    )
-      throw new Error(`Unexpected published file: ${path}`);
-  const listing = await execute("tar", ["-tvzf", tarball], { maxBuffer: 8_000_000 });
-  if (listing.stdout.split("\n").some((line) => line && !["-", "d"].includes(line[0])))
-    throw new Error("Release archive cannot contain links or special files");
   const extract = async (path) => {
     if (!files.includes(`package/${path}`)) throw new Error(`Missing packaged file: ${path}`);
     return (
@@ -70,6 +60,38 @@ export async function validateRelease(tarball, tag, root = repository) {
   const authored = JSON.parse(await readFile(resolve(root, "apps/cli/package.json"), "utf8"));
   if (JSON.stringify(releaseIdentity(authored, tag)) !== JSON.stringify(identity))
     throw new Error("Packed identity differs from authored CLI metadata");
+  if (
+    JSON.stringify(Object.entries(metadata.dependencies).sort()) !==
+    JSON.stringify(Object.entries(authored.dependencies).sort())
+  )
+    throw new Error("Packed runtime dependencies differ from authored CLI metadata");
+  const runtimePrefixes = Object.keys(metadata.dependencies).map(
+    (name) => `package/node_modules/${name}/`,
+  );
+  for (const path of files)
+    if (
+      !/^package\/(?:package\.json|README(?:\.md)?|LICENSE|dist\/(?:bin\/(?:index\.js|python-worker\.mjs)|assets\/(?:python\/(?:inspect|preview|neighborhood|calls)\.py|README\.md)|skills\/jevgrep\/SKILL\.md|LICENSE|THIRD_PARTY_NOTICES\.txt))$/.test(
+        path,
+      )
+    )
+      if (
+        !runtimePrefixes.some((prefix) => path.startsWith(prefix)) ||
+        path.split("/").some((part) => part === ".." || part === "." || !part)
+      )
+        throw new Error(`Unexpected published file: ${path}`);
+  const listing = await execute("tar", ["-tvzf", tarball], { maxBuffer: 8_000_000 });
+  if (listing.stdout.split("\n").some((line) => line && !["-", "d"].includes(line[0])))
+    throw new Error("Release archive cannot contain links or special files");
+  if (
+    JSON.stringify([...(metadata.bundleDependencies ?? [])].sort()) !==
+    JSON.stringify(Object.keys(metadata.dependencies).sort())
+  )
+    throw new Error("Every runtime dependency must be bundled");
+  for (const [name, version] of Object.entries(metadata.dependencies)) {
+    const bundled = JSON.parse((await extract(`node_modules/${name}/package.json`)).toString());
+    if (bundled.name !== name || bundled.version !== version)
+      throw new Error(`Bundled runtime dependency ${name} differs from release metadata`);
+  }
   const binary = (await extract("dist/bin/index.js")).toString();
   if (!binary.startsWith("#!/usr/bin/env node\n"))
     throw new Error("Packed executable must run in Node");
