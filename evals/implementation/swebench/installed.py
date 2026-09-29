@@ -597,8 +597,8 @@ def valid_cost(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
-def observed_jev(out, events, log_valid, traces_copied):
-    """Sum response-level gateway.cost once; provider retries are counts, not extra prices."""
+def observed_jev(out, events, log_valid, traces_copied, provider="vercel"):
+    """Sum Gateway costs or estimate native input usage at the retained public rate."""
     starts = [event for event in events if event.get('kind') == 'jev-request-start']
     ids = [event.get('requestId') for event in starts]
     safe_ids = {identifier for identifier in ids if isinstance(identifier, str) and re.fullmatch(r'[a-f0-9]{32}', identifier)}
@@ -611,6 +611,10 @@ def observed_jev(out, events, log_valid, traces_copied):
     coverage = (log_valid and traces_copied is True and len(safe_ids) == len(ids) and
                 safe_ids == set(responses) == set(requests) == safe_end_ids and len(safe_end_ids) == len(ends) == len(ids))
     costs, inputs, outputs, attempts = [], [], [], []
+    native_rate = Decimal('0.042') / 1_000_000
+    pricing = {'source': 'https://docs.typesafe.ai/models', 'verified_date': '2026-09-28',
+               'model': 'jev-1.13.0', 'input_usd_per_million': 0.042, 'output_usd_per_million': 0,
+               'basis': 'Public list-price estimate; no free-credit or negotiated discounts applied'} if provider == 'typesafe' else None
     def count(value):
         return type(value) is int and value >= 0
     # Retained response metadata remains known even if transport logs were lost.
@@ -625,6 +629,10 @@ def observed_jev(out, events, log_valid, traces_copied):
             provider_attempts = gateway.get('routing', {}).get('totalProviderAttemptCount')
             if count(provider_attempts): attempts.append(provider_attempts)
             value = gateway.get('cost')
+            if provider == 'typesafe':
+                value = None
+                if body.get('model') == 'jev-1.13.0' and count(usage.get('input_tokens')):
+                    value = str(Decimal(usage['input_tokens']) * native_rate)
             # Billing can be absent while usage and transport coverage remain known.
             try:
                 if type(value) not in (str, int, float): raise ValueError('Missing cost')
@@ -638,8 +646,16 @@ def observed_jev(out, events, log_valid, traces_copied):
                 coverage = False
                 continue
             end = matching[0]
-            if (end.get('status') != 200 or end.get('transportError') or end.get('incompleteStream') or
-                    end.get('responseBytes') != response.stat().st_size or end.get('requestBytes') != requests[identifier].stat().st_size):
+            # The broker captures each Jev chunk before writing it to the client.
+            # A client disconnect can therefore leave a complete bill in the trace
+            # even though responseBytes (delivered bytes) is smaller. Count that
+            # paid request, including its retries; malformed JSON still fails above.
+            captured_after_disconnect = (end.get('transportError') == 'BrokenPipeError' and
+                count(end.get('responseBytes')) and end['responseBytes'] <= response.stat().st_size)
+            if (end.get('status') != 200 or end.get('incompleteStream') or
+                    (not captured_after_disconnect and (end.get('transportError') or
+                        end.get('responseBytes') != response.stat().st_size)) or
+                    end.get('requestBytes') != requests[identifier].stat().st_size):
                 coverage = False
         except (OSError, ValueError, KeyError, TypeError, AttributeError, InvalidOperation):
             coverage = False
@@ -648,9 +664,11 @@ def observed_jev(out, events, log_valid, traces_copied):
     if not math.isfinite(known):
         known = None
         complete = False
-    return {'basis': 'Retained response provider_metadata.gateway.cost or historical providerMetadata.gateway.cost; observed API metadata, not invoice reconciliation',
-            'included_in_scored_task_cost': False, 'client_calls': len(ids), 'responses_with_cost': len(costs),
+    return {'basis': 'Native input usage at retained list price' if pricing else 'Retained response Gateway cost metadata; not invoice reconciliation',
+            'pricing': pricing, 'cost_kind': 'estimate' if pricing else 'reported',
+            'included_in_scored_task_cost': True, 'client_calls': len(ids), 'responses_with_cost': len(costs),
             'complete': complete, 'observed_cost_usd': known if complete else None, 'known_cost_usd': known,
+            'responses_with_client_disconnect': sum(event.get('transportError') == 'BrokenPipeError' for event in ends),
             'input_tokens': sum(inputs) if coverage and len(inputs) == len(ids) else None,
             'output_tokens': sum(outputs) if coverage and len(outputs) == len(ids) else None,
             'provider_attempts': sum(attempts) if coverage and len(attempts) == len(ids) else None,
@@ -695,13 +713,17 @@ def account(args):
     write_json(path, lookups)
     complete = log_valid and bool(identifiers) and len(request_ids) == len(starts) == len(ends) == len(identifiers) == len(lookups) and request_ids == {event.get('requestId') for event in ends} == {event.get('requestId') for event in observations} and all(event.get('streamTerminal') == 'response.completed' and not event.get('incompleteStream') and not event.get('transportError') and event.get('status') == 200 for event in ends) and all(valid_cost(row.get('metadata', {}).get('total_cost')) for row in lookups)
     known = sum(row.get('metadata', {}).get('total_cost', 0) for row in lookups if valid_cost(row.get('metadata', {}).get('total_cost')))
-    result = {'cell': plan['cell']['id'], 'request_starts': len(starts), 'generation_ids': len(identifiers), 'all_requests_accounted': complete, 'known_gateway_cost_usd': known, 'gateway_cost_usd': known if complete else None, 'baseline_cost_usd': plan['baseline_cost_usd'], 'jev': observed_jev(out, events, log_valid, receipt.get('jev_traces_copied'))}
+    result = {'cell': plan['cell']['id'], 'request_starts': len(starts), 'generation_ids': len(identifiers), 'all_requests_accounted': complete, 'known_gateway_cost_usd': known, 'gateway_cost_usd': known if complete else None, 'baseline_cost_usd': plan['baseline_cost_usd'], 'jev': observed_jev(out, events, log_valid, receipt.get('jev_traces_copied'), plan.get('jev_provider', 'vercel'))}
+    jev = result['jev']
+    result['task_cost_complete'] = complete and jev['complete']
+    result['task_cost_usd'] = known + jev['observed_cost_usd'] if result['task_cost_complete'] else None
+    result['known_task_cost_usd'] = known + (jev['known_cost_usd'] or 0)
     grading = out / 'grading-receipt.json'
     if grading.exists():
         grade_receipt = json.loads(grading.read_text())
         result['official_resolved'] = grade_receipt.get('run_id') == 'jg-' + plan['cell']['id'] and grade_receipt.get('exit_code') == 0 and grade_receipt.get('resolved_instances') == 1
         result['protocol_valid'] = protocol_valid(receipt)
-        result['successful_cost_win'] = complete and result['official_resolved'] and result['protocol_valid'] and known < plan['baseline_cost_usd']
+        result['successful_cost_win'] = result['task_cost_complete'] and result['official_resolved'] and result['protocol_valid'] and result['task_cost_usd'] < plan['baseline_cost_usd']
     write_json(out / 'generation-accounting.json', result)
     print(json.dumps(result))
 
@@ -728,12 +750,13 @@ def aggregate(args):
         protocol = terminal and protocol_valid(receipt)
         solved = graded and grading.get('resolved_instances') == 1
         billed = (terminal and billing.get('cell') == item['cell']['id'] and
-                  billing.get('all_requests_accounted') is True and valid_cost(billing.get('gateway_cost_usd')))
-        cost = billing.get('gateway_cost_usd') if billed else None
+                  billing.get('task_cost_complete') is True and valid_cost(billing.get('task_cost_usd')))
+        cost = billing.get('task_cost_usd') if billed else None
         rows.append({'task': item['cell']['instance_id'], 'status': receipt.get('status', 'not-started'),
                      'terminal': terminal, 'grading_attempted': grade_attempted, 'graded': graded, 'protocol_valid': protocol, 'official_resolved': solved, 'resolved': solved and protocol,
                      'baseline_resolved': item['baseline_resolved'], 'baseline_cost_usd': item['baseline_cost_usd'],
-                     'fully_billed': billed, 'gateway_cost_usd': cost,
+                     'fully_billed': billed, 'task_cost_usd': cost,
+                     'gateway_cost_usd': billing.get('gateway_cost_usd') if belongs and billing.get('cell') == item['cell']['id'] else None,
                      'jev': billing.get('jev', {}) if belongs and billing.get('cell') == item['cell']['id'] else {},
                      'known_gateway_cost_usd': billing.get('known_gateway_cost_usd') if belongs and billing.get('cell') == item['cell']['id'] and valid_cost(billing.get('known_gateway_cost_usd')) else None,
                      'successful_cost_win': solved and protocol and billed and cost < item['baseline_cost_usd']})
@@ -746,9 +769,9 @@ def aggregate(args):
               'official_solves': sum(row['official_resolved'] for row in rows),
               'comparison_basis': 'Saved no-Jev baselines; descriptive only, not version acceptance',
               'known_gateway_subtotal_usd': sum(row['known_gateway_cost_usd'] for row in rows if row['known_gateway_cost_usd'] is not None),
-              'fully_billed_total_usd': sum(row['gateway_cost_usd'] for row in rows) if all(row['fully_billed'] for row in rows) else None,
-              'jev': {'included_in_scored_task_cost': False,
-                      'basis': 'Observed response API metadata, not invoice reconciliation',
+              'fully_billed_total_usd': sum(row['task_cost_usd'] for row in rows) if all(row['fully_billed'] for row in rows) else None,
+              'jev': {'included_in_scored_task_cost': True,
+                      'basis': 'Per-task reported Gateway costs or native list-price estimates; not invoice reconciliation',
                       'complete': all(row['jev'].get('complete') is True and valid_cost(row['jev'].get('observed_cost_usd')) for row in rows),
                       'known_cost_usd': sum(row['jev']['known_cost_usd'] for row in rows if valid_cost(row['jev'].get('known_cost_usd'))),
                       'observed_cost_usd': sum(row['jev']['observed_cost_usd'] for row in rows) if all(row['jev'].get('complete') is True and valid_cost(row['jev'].get('observed_cost_usd')) for row in rows) else None},

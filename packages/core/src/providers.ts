@@ -23,6 +23,67 @@ export const providers = {
 
 export type ProviderId = keyof typeof providers;
 
+/** A custom record points at any TypeSafe-compatible endpoint instead of a fixed preset. */
+export const customProviderId = "custom";
+export const customProviderLabel = "Custom endpoint";
+
+export type CredentialProvider = ProviderId | typeof customProviderId;
+
+export type ProviderEndpoint = { label: string; baseURL: string; model: string };
+
+export type ProviderSelection = {
+  provider: CredentialProvider;
+  baseURL?: string;
+  model?: string;
+};
+
 export function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && Object.hasOwn(providers, value);
+}
+
+export function isCredentialProvider(value: unknown): value is CredentialProvider {
+  return value === customProviderId || isProviderId(value);
+}
+
+const loopbackHosts = new Set(["localhost", "127.0.0.1"]);
+
+export function validateBaseURL(value: unknown): string {
+  if (typeof value !== "string" || !value.trim())
+    throw new Error("Provide a base URL for the custom endpoint.");
+  const baseURL = value.trim();
+  let url: URL;
+  try {
+    url = new URL(baseURL);
+  } catch {
+    throw new Error("Base URL must be an absolute http(s) URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    throw new Error("Base URL must be an absolute http(s) URL.");
+  if (url.protocol === "http:" && !loopbackHosts.has(url.hostname))
+    throw new Error(
+      "Base URL must use https:// (http:// is allowed only for localhost or 127.0.0.1).",
+    );
+  return baseURL;
+}
+
+export function validateModel(value: unknown): string {
+  if (typeof value !== "string" || !value.trim() || /\s/.test(value.trim()))
+    throw new Error("Provide one non-empty model ID without whitespace.");
+  return value.trim();
+}
+
+function customEndpoint(selection: ProviderSelection): ProviderEndpoint {
+  const baseURL = validateBaseURL(selection.baseURL);
+  return {
+    label: `${customProviderLabel} (${new URL(baseURL).host})`,
+    baseURL,
+    model: validateModel(selection.model),
+  };
+}
+
+/** Resolve the transport settings for a saved record without exposing its key. */
+export function endpointFor(selection: ProviderSelection): ProviderEndpoint {
+  return selection.provider === customProviderId
+    ? customEndpoint(selection)
+    : providers[selection.provider];
 }

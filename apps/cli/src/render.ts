@@ -36,7 +36,6 @@ export function renderResult(
       return { file, excerpts, omitted };
     });
   const context = result.repositoryContext;
-  const quoteArg = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
   const omittedCount = files.filter(({ omitted }) => omitted).length;
   const lines = [
     `Jevgrep: ${files.length} relevant files${result.status !== "complete" ? "; discovery incomplete" : ""}.`,
@@ -47,12 +46,6 @@ export function renderResult(
     ...(result.warnings ?? []).map(({ kind, count }) => `Warning: ${quote(kind)}: ${count}`),
     ...result.issues.map(({ kind, count }) => `Issue: ${quote(kind)}: ${count}`),
     ...(result.providerFailure ? [`Provider error: ${quote(result.providerFailure)}`] : []),
-    ...context.pytestFiles.map((path) =>
-      [...path].some((character) => character.charCodeAt(0) < 32) ||
-      /[\u007f-\u009f\u2028-\u202e\u2066-\u2069]/.test(path)
-        ? `Suggested test arguments (not executed): [${["python", "-m", "pytest", "-q", path].map(quote).join(", ")}]`
-        : `Suggested test entry point (not executed): python -m pytest -q ${quoteArg(path)}`,
-    ),
     ...files.flatMap(({ file, excerpts, omitted }) => [
       `- ${quote(file.path)} — ${file.roles.join(", ") || "relevant; role uncertain"}; ${excerpts.length ? "source below" : omitted ? "source omitted" : "locations only"}`,
     ]),
@@ -121,7 +114,7 @@ export function renderInventory(inventory: Inventory, maxDirectories = 20): stri
   );
   const lines = [
     `Jevgrep files: ${files(inventory.files)} eligible (${size(inventory.bytes)})${inventory.status === "complete" ? "" : `; ${inventory.status === "interrupted" ? "interrupted" : "listing incomplete"}`}. No provider requests were made.`,
-    "A search reads only what it explores and still skips binary, credential-like, or over-16 MiB files.",
+    "A search reads only what it explores; content checks may further exclude binary, credential-like, or over-16 MiB files.",
     ...(excluded.length
       ? [
           `Skipped paths (a skipped directory counts once): ${excluded.map(([reason, value]) => `${quote(reason)} ${count(value)}`).join("; ")}.`,

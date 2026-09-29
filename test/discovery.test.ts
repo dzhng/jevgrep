@@ -17,6 +17,38 @@ type Body = {
   questions: Record<string, unknown>;
 };
 const query = "Find Anchor implementations and related backends";
+testIfDocker("shallow lookahead classifies file previews before admitting files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jg-folder-gate-"));
+  try {
+    for (const name of ["useful", "unrelated"]) {
+      await mkdir(join(root, name));
+      await writeFile(join(root, name, "handler.ts"), `export function ${name}() { return 1; }\n`);
+    }
+    const paths: string[] = [];
+    const result = await retrieve(
+      { root, query: "Find useful behavior", signal: new AbortController().signal },
+      {
+        requests: 0,
+        async evaluate(request) {
+          const items = (request.state as Body["state"]).items;
+          if (items) paths.push(...items.map((item) => item.path));
+          return Object.fromEntries(
+            Object.keys(request.questions).map((key, index) => [
+              key,
+              items ? (items[index]!.path.startsWith("useful") ? 0.9 : 0.1) : 0.9,
+            ]),
+          );
+        },
+      },
+    );
+    expect(result.status).toBe("complete");
+    expect(paths).toContain("unrelated/handler.ts");
+    expect(result.files.map((file) => file.path)).not.toContain("unrelated/handler.ts");
+    expect(result.files.map((file) => file.path)).toContain("useful/handler.ts");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 async function trajectory(
   root: string,
   reverseRelationCompletion = false,
@@ -54,16 +86,18 @@ async function trajectory(
             Object.keys(body.questions).map((id, i) => {
               const item = body.state.items?.[i];
               const probability =
-                item?.kind === "directory"
-                  ? body.state.relationAnchor &&
-                    item.path.split("/").some((segment) => segment.startsWith("related")) &&
-                    !item.path.includes("-cap") &&
-                    !item.path.includes("-escaped")
-                    ? 0.9
-                    : 0.5
-                  : item?.path.startsWith("Anchor.")
-                    ? 0.9
-                    : 0.25;
+                item?.kind === "directory" && ["src", "tests"].includes(item.path)
+                  ? 0.9
+                  : item?.kind === "directory"
+                    ? body.state.relationAnchor &&
+                      item.path.split("/").some((segment) => segment.startsWith("related")) &&
+                      !item.path.includes("-cap") &&
+                      !item.path.includes("-escaped")
+                      ? 0.9
+                      : 0.5
+                    : item?.path.startsWith("Anchor.")
+                      ? 0.9
+                      : 0.25;
               return [id, { type: "boolean", probability }];
             }),
           ),
@@ -301,6 +335,103 @@ testIfDocker(
       expect(JSON.stringify(actual)).not.toContain("src/blocked");
     } finally {
       await chmod(blocked, 0o700);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+for (const [extension, declaration] of [
+  ["c", "int record_telemetry(void) { return 42; }"],
+  ["ts", "export function run() { record_telemetry(); }"],
+] as const) {
+  testIfDocker(
+    `${extension} negative preview does not trigger an exhaustive source scan`,
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "jg-late-source-"));
+      try {
+        await writeFile(
+          join(root, `engine.${extension}`),
+          "/* unrelated initialization details */\n".repeat(700) + `${declaration}\n`,
+        );
+        const signal = new AbortController().signal;
+        const evaluator = createEvaluator({
+          apiKey: "fixture",
+          provider: "typesafe",
+          signal,
+          fetch: async (_input, init) => {
+            const body = JSON.parse(String(init?.body)) as {
+              state: { items?: Array<{ filePreview?: { text: string } }> };
+              questions: Record<string, unknown>;
+            };
+            return Response.json({
+              answers: Object.fromEntries(
+                Object.keys(body.questions).map((id, i) => [
+                  id,
+                  {
+                    type: "noul",
+                    noul: body.state.items
+                      ? body.state.items[i]?.filePreview?.text.includes("record_telemetry")
+                        ? 0.9
+                        : 0.1
+                      : 0.9,
+                  },
+                ]),
+              ),
+            });
+          },
+        });
+        const result = await retrieve(
+          { root, query: "Find telemetry recording", signal },
+          evaluator,
+        );
+        expect(result.status).toBe("complete");
+        // The unseen declaration is intentionally not discovered after a negative
+        // preview judgment. Completion describes the search, not exhaustive recall.
+        expect(result.files.map((file) => file.path)).not.toContain(`engine.${extension}`);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+}
+
+testIfDocker(
+  "long queries can discover files whose complete preview does not fit",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-long-query-"));
+    try {
+      await writeFile(
+        join(root, "engine.c"),
+        "/* padding padding padding */\n".repeat(530) +
+          "int record_telemetry(void) { return 42; }\n",
+      );
+      const signal = new AbortController().signal;
+      const evaluator = createEvaluator({
+        apiKey: "fixture",
+        provider: "typesafe",
+        signal,
+        fetch: async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as { questions: Record<string, unknown> };
+          return Response.json({
+            answers: Object.fromEntries(
+              Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.9 }]),
+            ),
+          });
+        },
+      });
+      const result = await retrieve(
+        { root, query: "context ".repeat(2800) + "Find telemetry recording", signal },
+        evaluator,
+      );
+      expect(result.status).toBe("complete");
+      expect(
+        result.files
+          .find((file) => file.path === "engine.c")
+          ?.excerpts.some((excerpt) => excerpt.source.includes("int record_telemetry(void)")),
+      ).toBe(true);
+    } finally {
       await rm(root, { recursive: true, force: true });
     }
   },

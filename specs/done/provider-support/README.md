@@ -25,6 +25,12 @@ This is a simpler setup contract, not a multi-account credential registry.
 - The application owns actual HTTP attempts, retries, shared rate-limit cooldown
   and cancellation. SDK retries remain disabled. The 50,000-attempt guard protects
   against runaway work; it is not an optimization budget.
+- TypeSafe throughput is paced by estimated input tokens and request starts,
+  independently of the concurrent-request ceiling. Reservations use conservative
+  payload bytes until reported usage is available. Queue waits happen before the
+  network timeout and source is revalidated after waiting. These budgets belong
+  to one search; other processes sharing the account can still cause rate limits,
+  so provider cooldowns remain authoritative.
 - Source freshness is checked before attempts and cached evidence use. An invalid
   provider answer is failure or incomplete discovery, never negative evidence.
 - Exact answer-cache identity separates provider, endpoint, model and protocol,

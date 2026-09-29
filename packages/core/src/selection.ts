@@ -146,10 +146,10 @@ export async function selectFile(
   for (const unit of units) {
     if (
       pending.length &&
-      (pending.length >= 8 ||
+      (pending.length >= 128 ||
         Buffer.byteLength(
           lines.slice(pending[0]!.range.startLine - 1, unit.range.endLine).join("\n"),
-        ) > 14000)
+        ) > 42000)
     ) {
       groups.push(pending);
       pending = [];
@@ -158,7 +158,8 @@ export async function selectFile(
   }
   if (pending.length) groups.push(pending);
   let invalidated = false;
-  for (const group of groups) {
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+    const group = groups[groupIndex]!;
     try {
       const prepared = prepare ? await prepare() : {};
       if (prepared === null) {
@@ -193,6 +194,13 @@ export async function selectFile(
         group.map((unit) => ({ name: unit.name, ...unit.range })),
         prepared.evidence,
       );
+      // Shared evidence contributes to the state limit as well as local source.
+      if (group.length > 1 && Buffer.byteLength(JSON.stringify(request.state)) > 80_000) {
+        const middle = Math.ceil(group.length / 2);
+        groups.splice(groupIndex, 1, group.slice(0, middle), group.slice(middle));
+        groupIndex--;
+        continue;
+      }
       const answers = await evaluator.evaluate(request);
       const values = group.map((unit, index) => {
         const values = [

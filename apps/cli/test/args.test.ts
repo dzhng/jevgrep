@@ -71,6 +71,39 @@ test("auth requires explicit provider for stdin and keeps provider selection out
     expect(() => parseCommand(args)).toThrow();
 });
 
+test("custom auth carries an explicit base URL and model while presets reject them", () => {
+  expect(
+    parseCommand([
+      "auth",
+      "--provider",
+      "custom",
+      "--base-url",
+      "https://gateway.example.com/typesafe/v1",
+      "--model",
+      "gateway/jev-2",
+      "--stdin",
+    ]),
+  ).toEqual({
+    kind: "auth",
+    provider: "custom",
+    baseURL: "https://gateway.example.com/typesafe/v1",
+    model: "gateway/jev-2",
+  });
+  for (const args of [
+    ["auth", "--provider", "custom", "--stdin"],
+    ["auth", "--provider", "custom", "--base-url", "https://gateway.example.com/v1", "--stdin"],
+    ["auth", "--provider", "custom", "--model", "gateway/jev-2", "--stdin"],
+    ["auth", "--provider", "vercel", "--base-url", "https://gateway.example.com/v1", "--stdin"],
+    ["auth", "--provider", "vercel", "--model", "gateway/jev-2", "--stdin"],
+    ["auth", "--base-url", "https://gateway.example.com/v1", "--model", "gateway/jev-2", "--stdin"],
+    ["doctor", "--base-url", "https://gateway.example.com/v1"],
+    ["doctor", "--model", "gateway/jev-2"],
+    ["question", "--base-url", "https://gateway.example.com/v1"],
+    ["cache", "clear", "--model", "gateway/jev-2"],
+  ])
+    expect(() => parseCommand(args)).toThrow();
+});
+
 test("concurrency is a positive search-only limit and does not change cache policy", () => {
   const command = parseCommand(["question", "--concurrency", "2"]);
   expect(command).toMatchObject({ kind: "search", concurrency: 2, policy: {} });
@@ -95,4 +128,24 @@ test("files takes an optional root and only the filesystem policy flags", () => 
     ["files", "--provider", "vercel"],
   ])
     expect(() => parseCommand(args)).toThrow("Usage: jg files");
+});
+
+test("exclude patterns are repeatable, normalized for cache identity, and limited to search or files", () => {
+  expect(
+    parseCommand([
+      "question",
+      "--exclude",
+      "src/**/*.test.ts",
+      "--exclude",
+      "admin/",
+      "--exclude=admin/",
+    ]),
+  ).toMatchObject({ kind: "search", policy: { exclude: ["admin/", "src/**/*.test.ts"] } });
+  expect(parseCommand(["question", "--no-ignore", "--exclude", "docs"])).toMatchObject({
+    policy: { noIgnore: true, exclude: ["docs"] },
+  });
+  for (const pattern of ["", " ", "!keep.ts", "#note", "a\nb", "secrets\\", "\\"])
+    expect(() => parseCommand(["question", "--exclude", pattern])).toThrow("--exclude");
+  for (const args of [["doctor"], ["auth"], ["skill"], ["cache", "clear"]])
+    expect(() => parseCommand([...args, "--exclude", "docs"])).toThrow();
 });

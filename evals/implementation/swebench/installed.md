@@ -31,8 +31,9 @@ python3 evals/implementation/swebench/installed.py run \
 Preparation and dry-run make no model calls. `prepare` defaults to all ten tasks;
 `--jev-provider typesafe` selects native Jev for a separately identified provider
 experiment. Sol continues through Gateway. The broker holds both real credentials;
-the agent receives only its scoped broker token. Native Jev billing is unknown
-without Gateway metadata and remains excluded from scored Sol cost.
+the agent receives only its scoped broker token. Native Jev cost is estimated from recorded input usage at the documented
+list price frozen in the runner. Total task cost includes both Sol and Jev.
+Missing usage or incomplete transport coverage leaves that total unknown.
 `--task` selects one registered task. `--evidence-root` locates the retained
 baseline and evaluator files when preparing from another checkout. The root
 `eval:swebench` alias points to this entry point; `--help` lists its arguments.

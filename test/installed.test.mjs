@@ -499,7 +499,9 @@ test("actual installed search parses Python and returns every relevant hierarchy
 test("search concurrency limits all stages against a busy provider", async (t) => {
   let active = 0;
   let peak = 0;
-  const fixture = await context(t, async ({ response }) => {
+  const pending = [];
+  let initialSelectionArrivals = 0;
+  const fixture = await context(t, async ({ body, response }) => {
     active++;
     peak = Math.max(peak, active);
     response.once("finish", () => active--);
@@ -508,7 +510,19 @@ test("search concurrency limits all stages against a busy provider", async (t) =
       response.end(JSON.stringify({ error: "Too many concurrent calls" }));
       return true;
     }
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    if (Array.isArray(body.state.declarations) && !body.state.selectedEvidence) {
+      initialSelectionArrivals++;
+      if (initialSelectionArrivals <= 2) {
+        await new Promise((resolve) => {
+          const deadline = setTimeout(resolve, 5000);
+          pending.push(() => {
+            clearTimeout(deadline);
+            resolve();
+          });
+          if (pending.length === 2) pending.forEach((release) => release());
+        });
+      }
+    }
     return false;
   });
   complete(await fixture.run([query, fixture.tree, "--concurrency", "2", "--no-cache"]));
@@ -1049,7 +1063,7 @@ test("installed queued freshness withholds excluded source uploads", async (t) =
         await new Promise((resolve) => {
           releases.push(resolve);
           if (releases.length === 8)
-            void writeFile(join(tree, ".ignore"), "large.txt\n").then(() =>
+            void writeFile(join(tree, ".ignore"), "large-*.txt\n").then(() =>
               releases.forEach((release) => release()),
             );
         });
@@ -1067,10 +1081,11 @@ test("installed queued freshness withholds excluded source uploads", async (t) =
   t.after(() => releases.forEach((release) => release()));
   await rm(fixture.tree, { recursive: true });
   await mkdir(fixture.tree);
-  await writeFile(
-    join(fixture.tree, "large.txt"),
-    "QUEUED_INSTALLED_SENTINEL line\n".repeat(18000),
-  );
+  for (let index = 0; index < 48; index++)
+    await writeFile(
+      join(fixture.tree, `large-${index}.txt`),
+      "QUEUED_INSTALLED_SENTINEL line\n".repeat(800),
+    );
   // Fill every provider slot before changing the policy, leaving later uploads queued.
   const result = await fixture.run([query, fixture.tree, "--concurrency", "8", "--no-cache"]);
   assert.equal(uploads, 8);

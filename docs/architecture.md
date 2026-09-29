@@ -9,12 +9,20 @@ is data, never instructions.
 Hierarchical traversal uses directory metadata and content previews to decide where
 to explore. It does not upload the entire tree first. Keep files that pass relevance
 criteria without a fixed top-N limit. Unread descendants and failed classifications
-remain unknown; partial discovery must be reported honestly.
+remain unknown; partial discovery must be reported honestly. A healthy negative file
+preview does not trigger an exhaustive scan of unseen source. This limits upload
+cost but can miss relevant code later in a file. Completion means the planned
+search finished, not that every relevant byte was found. Oversized preview requests
+are split into bounded source chunks.
 
 Source relevance and scope are separate judgments. The current implementation
 counts even when it contains the bug. Contextual follow-up can recover concretely
 referenced code and retract earlier selections when valid evidence rejects them.
-A failed judgment must not erase previously obtained evidence.
+A failed judgment must not erase previously obtained evidence. Shared criteria and
+local source windows amortize repeated context across declaration judgments.
+Contextual follow-up checks files in sequence so changing donor evidence can be
+revalidated between files; initial selection and provider requests retain their
+concurrency and token-aware admission.
 
 Source selection and presentation are separate. Declaration units, comments,
 structural class headers and bounded local-call context preserve meaning without
@@ -35,8 +43,8 @@ questions, while implementation queries generally favor executable code.
 
 The [public skill](../skills/jevgrep/SKILL.md) owns installation and agent usage.
 The skill explains invocation and output semantics; the calling agent owns its
-research, implementation and testing workflow. Suggested test commands have not been executed and do not
-prove coverage.
+research, implementation and testing workflow. The CLI returns source evidence
+and repository instruction locations without synthesizing test commands.
 
 ## Providers and eligibility
 

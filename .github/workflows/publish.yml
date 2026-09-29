@@ -82,7 +82,17 @@ jobs:
       - name: Retrieve the exact public registry version
         run: |
           mkdir -p "$RUNNER_TEMP/jevgrep-registry"
-          npm pack "@dzhng/jevgrep@$RELEASE_VERSION" --ignore-scripts --pack-destination "$RUNNER_TEMP/jevgrep-registry"
+          # npm can accept publication before the public registry exposes it.
+          for attempt in {1..12}; do
+            if npm pack "@dzhng/jevgrep@$RELEASE_VERSION" --ignore-scripts --pack-destination "$RUNNER_TEMP/jevgrep-registry"; then
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              exit 1
+            fi
+            echo "Waiting for the published version to become available (attempt $attempt/12)."
+            sleep 15
+          done
       - name: Match the registry archive to the verified candidate
         run: node scripts/validate-release.mjs "$RUNNER_TEMP/jevgrep-registry/dzhng-jevgrep-$RELEASE_VERSION.tgz" "v$RELEASE_VERSION" "$RELEASE_INTEGRITY"
       - name: Install registry bytes fresh and run installed journeys

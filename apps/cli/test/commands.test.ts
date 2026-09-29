@@ -40,6 +40,11 @@ testInDocker("files counts eligible content without credentials or network", asy
     );
     expect(result.stdout).toContain('Skipped paths (a skipped directory counts once): "hidden" 1.');
     expect(result.stdout).not.toContain("SECRET");
+    const excluded = await run(["files", "project", "--exclude", "src/", "--no-ignore"]);
+    expect(excluded).toMatchObject({ code: 0, stderr: "" });
+    expect(excluded.stdout).toContain("Jevgrep files: 0 files eligible (0 B).");
+    expect(excluded.stdout).toContain('"exclude_pattern" 1');
+    expect((await run(["files", "project", "--exclude", "!src/"])).code).toBe(1);
     expect(await run(["files", "missing"])).toMatchObject({
       code: 1,
       stdout: "The root must be an existing directory.\n",
