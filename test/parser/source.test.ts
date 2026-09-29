@@ -411,3 +411,30 @@ test("class context is marked structurally, not inferred from member names", asy
     ["Widget@1-1", "Widget.context@2-2 [class context]", "Widget.context@3-5"],
   );
 });
+
+test("long Python comment runs parse quickly without changing declarations", async () => {
+  const run = (indent: string, count: number) =>
+    Array.from({ length: count }, (_, i) => `${indent}# n${i} don't "q" {x}`).join("\n");
+  // Parsing was quadratic in a comment run: 8,000 lines took 9.5 s.
+  const source =
+    `class Box:\n${run("    ", 12_000)}\n    def first(self):\n        return 1\n` +
+    `${run("", 12_000)}\ndef second():\n    return 2\n`;
+  const started = performance.now();
+  const result = await inspect(
+    { path: "notes.py", source, contentHash: "fixture" },
+    { maxUnitBytes: Buffer.byteLength(source) },
+  );
+  assert.ok(performance.now() - started < 5_000, "comment runs were not parsed quickly");
+  assert.deepEqual(
+    result.units.map(({ name, range }) => `${name}@${range.startLine}-${range.endLine}`),
+    ["Box.context@1-12001", "Box.first@12002-12003", "second@24004-24005"],
+  );
+  // Comment-looking lines inside a string are string content, even with quotes and braces.
+  const inString = `value = f"""\n${run("", 300)}\n"""\n` + 'def after():\n    return """#"""\n';
+  const parsed = await inspect({ path: "doc.py", source: inString, contentHash: "fixture" });
+  assert.equal(parsed.mode, "python");
+  assert.deepEqual(
+    parsed.units.map(({ name, range }) => `${name}@${range.startLine}-${range.endLine}`),
+    ["after@303-304"],
+  );
+});

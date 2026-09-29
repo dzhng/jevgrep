@@ -52,7 +52,10 @@ with syntax errors use text fallback. Bare-CR Python also uses text fallback
 because retrieval coordinates count LF lines. So does generated source nested
 beyond what a parser handles: TypeScript that exhausts the call stack, and Python
 nested more than 50,000 levels, near where Tree-sitter queries stop matching and
-slow down sharply. Repository source is never executed.
+slow down sharply. Long runs of whole-line Python comments are parsed as blank
+lines of the same length, because the grammar's scanner is quadratic in a run's
+length; a run that may belong to a string is parsed as written.
+Repository source is never executed.
 See [parser contracts](../test/parser/README.md) and
 [measurement evidence](../specs/tree-sitter/RESULTS.md).
 

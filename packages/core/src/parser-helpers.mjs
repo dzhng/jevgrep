@@ -4,6 +4,57 @@ import { declarations } from "./parser-declarations.mjs";
 import { preview } from "./parser-preview.mjs";
 let initialized;
 const languages = new Map();
+// Tree-sitter's Python scanner rescans the rest of a comment run at every line of it, so parsing is
+// quadratic in the run's length: 8,000 consecutive comment lines took 9.5 s. Every helper skips
+// comment nodes, so long runs are parsed as blank lines of the same length, which keeps line and
+// column coordinates. Only quotes, backslashes and braces can change where strings and f-string
+// fields begin or end; if a blanked line containing one lies inside a string, or the substitute
+// has an error, the original source is parsed instead.
+const longCommentRun = 256;
+const commentLine = /^[ \t\f]*#/;
+function parsePython(parser, source) {
+  const lines = source.split("\n");
+  let run = 0,
+    longest = 0;
+  for (const line of lines) {
+    if (commentLine.test(line)) longest = Math.max(longest, ++run);
+    else if (line.trim()) run = 0;
+  }
+  if (longest < longCommentRun) return parser.parse(source);
+  const suspect = [];
+  const blanked = lines
+    .map((line, row) => {
+      if (!commentLine.test(line)) return line;
+      const end = line.endsWith("\r") ? line.length - 1 : line.length;
+      if (/["'\\{}]/.test(line.slice(0, end))) suspect.push(row);
+      return " ".repeat(end) + line.slice(end);
+    })
+    .join("\n");
+  const tree = parser.parse(blanked);
+  if (tree && !tree.rootNode.hasError) {
+    // Queries are unreliable on trees too deep for them; parse() rejects those trees anyway.
+    if (deeperThan(tree, maxTreeDepth) || !insideStrings(tree, suspect, lines.length)) return tree;
+  }
+  tree?.delete();
+  return parser.parse(source);
+}
+let stringSpans;
+function insideStrings(tree, rows, lineCount) {
+  if (!rows.length) return false;
+  stringSpans ??= new Query(languages.get("python"), "(string) @string");
+  // Blanked lines hold no quotes, so a string can only span them, never start or end on them.
+  const depth = new Int32Array(lineCount + 1);
+  for (const { node } of stringSpans.captures(tree.rootNode)) {
+    const first = node.startPosition.row + 1,
+      last = node.endPosition.row;
+    if (first < last) {
+      depth[first]++;
+      depth[last]--;
+    }
+  }
+  for (let row = 1; row < depth.length; row++) depth[row] += depth[row - 1];
+  return rows.some((row) => depth[row] > 0);
+}
 async function parse(source, action, languageName = "python") {
   // Retrieval coordinates count LF lines; normalizing bare CR would mislabel original bytes.
   if (languageName === "python" && /\r(?!\n)/.test(source)) return null;
@@ -21,7 +72,7 @@ async function parse(source, action, languageName = "python") {
   let tree;
   try {
     parser.setLanguage(languages.get(languageName));
-    tree = parser.parse(source);
+    tree = languageName === "python" ? parsePython(parser, source) : parser.parse(source);
     if (!tree || tree.rootNode.hasError) return null;
     // Tree-sitter queries stop reporting matches beyond 65,535 levels of nesting and slow down
     // sharply near that depth: 70,000 chained `+` took 8 s, 100,000 took 74 s. Treat such
