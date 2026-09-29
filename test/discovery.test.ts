@@ -2,7 +2,7 @@ import { decodeProviderRequest, wireResponse } from "./helpers/provider";
 import { routeProviderFetch } from "./fixtures/provider-route.mjs";
 import { expect } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm, chmod } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { testIfDocker } from "./helpers/docker";
 import { retrieve } from "../packages/core/src/retrieve";
@@ -436,4 +436,115 @@ testIfDocker(
     }
   },
   120_000,
+);
+
+type PreviewItem = {
+  path: string;
+  kind: string;
+  filePreview?: {
+    sizeBytes: number;
+    previewBytes: number;
+    text: string;
+    truncated: boolean;
+    range: string;
+    declarations?: Array<{ name: string }>;
+  };
+};
+
+/** Records every file preview discovery uploads, so preview spend can be asserted. */
+async function previewsFor(root: string, files: Record<string, string>) {
+  await mkdir(root, { recursive: true });
+  for (const [name, source] of Object.entries(files)) {
+    await mkdir(join(root, dirname(name)), { recursive: true });
+    await writeFile(join(root, name), source);
+  }
+  const seen = new Map<string, PreviewItem["filePreview"]>();
+  let navigationBytes = 0;
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const body = (await request.json()) as {
+        state: { items?: PreviewItem[] };
+        questions: Record<string, unknown>;
+      };
+      const items = body.state.items ?? [];
+      for (const item of items) if (item.filePreview) seen.set(item.path, item.filePreview);
+      if (items.length) navigationBytes += Buffer.byteLength(JSON.stringify(body));
+      return Response.json({
+        answers: Object.fromEntries(
+          Object.keys(body.questions).map((id, index) => {
+            const item = items[index];
+            // Every directory is explored; only the beacons are worth reading further.
+            const wanted = !item || item.kind === "directory" || item.path.endsWith(".py");
+            return [id, { type: "noul", noul: wanted ? 0.9 : 0.1 }];
+          }),
+        ),
+      });
+    },
+  });
+  try {
+    const signal = new AbortController().signal;
+    await retrieve(
+      { root, query: "find the deep beacon", signal },
+      createEvaluator({
+        apiKey: "fixture",
+        provider: "typesafe",
+        signal,
+        fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+      }),
+    );
+    return { previews: seen, navigationBytes };
+  } finally {
+    server.stop(true);
+  }
+}
+
+// A declaration that no prefix of the file can reveal, so only a name index exposes it.
+function beaconFile(name: string) {
+  const padding = "# padding padding padding padding padding\n".repeat(1_200);
+  return `${padding}def ${name}():\n    return True\n`;
+}
+
+testIfDocker(
+  "a small repository still previews the full opening of every file",
+  async () => {
+    const root = join(await mkdtemp(join(tmpdir(), "jg-full-preview-")), "project");
+    const { previews } = await previewsFor(root, {
+      "beacon.py": beaconFile("deep_beacon"),
+      "notes.md": "# notes\n".repeat(3_000),
+    });
+    const beacon = previews.get("beacon.py")!;
+    expect(beacon.sizeBytes).toBeGreaterThan(16_384);
+    expect(beacon.truncated).toBe(true);
+    // An unparsed file is previewed verbatim, so it pins the exact allowance.
+    expect(previews.get("notes.md")!.previewBytes).toBe(16_384);
+    // The whole-file allowance still carries the declaration index.
+    expect(beacon.declarations?.map((entry) => entry.name)).toContain("deep_beacon");
+  },
+  120_000,
+);
+
+testIfDocker(
+  "a large repository previews a bounded share of each file and names its declarations",
+  async () => {
+    const root = join(await mkdtemp(join(tmpdir(), "jg-budget-preview-")), "project");
+    const files: Record<string, string> = {
+      "beacon.py": beaconFile("deep_beacon"),
+      "other.py": beaconFile("other_beacon"),
+    };
+    // Enough small files that a flat opening per file would dominate the run.
+    for (let i = 0; i < 2_100; i++) files[`many/f${i}.txt`] = "filler\n";
+    const { previews, navigationBytes } = await previewsFor(root, files);
+    const beacon = previews.get("beacon.py")!;
+    expect(beacon.sizeBytes).toBeGreaterThan(16_384);
+    expect(beacon.truncated).toBe(true);
+    // The sampled allowance is a small share of the file, not a flat 16 KiB.
+    expect(beacon.previewBytes).toBeLessThanOrEqual(2_048);
+    // Screening signal comes from names across the whole file, not from more raw bytes.
+    expect(beacon.declarations?.map((entry) => entry.name)).toContain("deep_beacon");
+    expect(Buffer.byteLength(JSON.stringify(previews.get("other.py")!))).toBeLessThan(4_096);
+    // 2,103 eligible files at a flat 16 KiB opening would upload roughly 35 MB.
+    expect(navigationBytes).toBeLessThan(Object.keys(files).length * 1_200);
+  },
+  300_000,
 );

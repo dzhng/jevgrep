@@ -45,6 +45,21 @@ test("source precedes detailed locations and remains verbatim", () => {
   expect(output.endsWith("\nEnd context.\n")).toBe(true);
 });
 
+test("spend is reported with the file summary so a run's cost is visible", () => {
+  const value = result();
+  value.counts = { requests: 1234, cacheHits: 56, inspectedFiles: 78, inputTokens: 4_500_000 };
+  const output = renderResult(value);
+  expect(output).toContain("Jev requests: 1,234 (56 served from cache); input tokens: 4,500,000.");
+  // The summary stays first: spend is read before the source blocks.
+  expect(output.indexOf("Jev requests:")).toBeLessThan(output.indexOf("Source block"));
+});
+
+test("spend omits tokens when the evaluator cannot report usage", () => {
+  const output = renderResult(result());
+  expect(output).toContain("Jev requests: 1 (0 served from cache).");
+  expect(output).not.toContain("input tokens");
+});
+
 test("explicit byte limits preserve all locations and mark omissions without clipping UTF-8", () => {
   const value = result();
   value.files.push({

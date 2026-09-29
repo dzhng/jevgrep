@@ -18,6 +18,8 @@ export type Command =
       root: string;
       noCache: boolean;
       concurrency?: number;
+      maxRequests?: number;
+      maxTokens?: number;
       maxSourceBytes: number;
       policy: NonNullable<SearchInput["policy"]>;
     };
@@ -42,6 +44,8 @@ export function parseCommand(args: string[]): Command {
         "no-cache": { type: "boolean" },
         concurrency: { type: "string" },
         "max-source-bytes": { type: "string" },
+        "max-requests": { type: "string" },
+        "max-tokens": { type: "string" },
         hidden: { type: "boolean" },
         "no-ignore": { type: "boolean" },
         "include-dependencies": { type: "boolean" },
@@ -130,6 +134,8 @@ export function parseCommand(args: string[]): Command {
     if (!/^\d+$/.test(values.concurrency) || !Number.isSafeInteger(concurrency) || concurrency < 1)
       throw new CliError("--concurrency must be a positive integer.");
   }
+  const maxRequests = budget(values["max-requests"], "--max-requests");
+  const maxTokens = budget(values["max-tokens"], "--max-tokens");
   const rawBudget = values["max-source-bytes"];
   const maxSourceBytes = rawBudget === undefined ? DEFAULT_MAX_SOURCE_BYTES : Number(rawBudget);
   if (
@@ -144,9 +150,19 @@ export function parseCommand(args: string[]): Command {
     root: positionals[1] ?? process.cwd(),
     noCache: values["no-cache"] ?? false,
     ...(concurrency === undefined ? {} : { concurrency }),
+    ...(maxRequests === undefined ? {} : { maxRequests }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
     maxSourceBytes,
     policy,
   };
+}
+
+/** Provider budgets are optional ceilings, so an unset flag stays undefined. */
+function budget(value: string | undefined, flag: string) {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1)
+    throw new CliError(`${flag} must be a positive integer.`);
+  return Number(value);
 }
 
 function policyFrom(values: {
@@ -210,6 +226,8 @@ the skills installer prompts for agents and installation settings.
 
 Search options:
   --max-source-bytes N     Source allocation; 0 means unlimited (default: ${DEFAULT_MAX_SOURCE_BYTES})
+  --max-requests N         Stop after N Jev requests; results stay partial
+  --max-tokens N           Stop after N reported input tokens; results stay partial
   --hidden                Include hidden paths
   --no-ignore             Disable .gitignore/.ignore patterns
   --include-dependencies  Include dependency and build directories
@@ -217,6 +235,11 @@ Search options:
   --exclude PATTERN       Skip paths matching a gitignore pattern; repeatable
   --no-cache              Disable cache reads and writes
   --concurrency N         Limit in-flight Jev requests; try 1–4 on slow networks
+
+Every run reports its Jev request count and reported input tokens. Both budgets are
+ceilings checked before each request, so concurrent work in flight can exceed them
+slightly. A budget that runs out ends the run as "discovery incomplete" and still
+returns the evidence gathered so far.
 
 Filesystem policy flags also apply to jg files.
 Patterns are relative to the root. --exclude only narrows; other flags broaden

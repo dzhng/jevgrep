@@ -15,6 +15,17 @@ cost but can miss relevant code later in a file. Completion means the planned
 search finished, not that every relevant byte was found. Oversized preview requests
 are split into bounded source chunks.
 
+Discovery spends a fixed text budget across the eligible tree, measured by a
+directory-only count taken before any source is uploaded. Repositories within the
+budget keep a full opening preview per file; larger ones take a smaller sample
+paired with the file's declaration names, so a file is still screened across its
+whole length for fewer bytes. Fan-out inside one directory does not predict the
+total, because a large repository spreads its files over many directories. Role
+assessment shares one request across several files; a failed group is split, so one
+unusable file still leaves its neighbours classified. Spend is reported, and an
+optional request or token ceiling ends a run as partial discovery rather than as a
+failure.
+
 Source relevance and scope are separate judgments. The current implementation
 counts even when it contains the bug. Contextual follow-up can recover concretely
 referenced code and retract earlier selections when valid evidence rejects them.

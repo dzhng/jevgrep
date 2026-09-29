@@ -72,6 +72,59 @@ test("transient failures retry within the shared request guard and never become 
   }
 });
 
+test("reported input tokens accumulate and a token budget stops later requests", async () => {
+  let calls = 0;
+  const server = Bun.serve({
+    port: 0,
+    fetch() {
+      calls++;
+      return Response.json({
+        answers: { q: { type: "noul", noul: 0.8 } },
+        usage: { input_tokens: 1_000, output_tokens: 2 },
+      });
+    },
+  });
+  try {
+    const evaluator = createEvaluator({
+      apiKey: "fixture",
+      provider: "vercel",
+      fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+      signal: new AbortController().signal,
+      tokenLimit: 1_500,
+    });
+    const request = {
+      state: "record events",
+      questions: { q: { type: "boolean" as const, instructions: "Relevant?" } },
+    };
+    expect(await evaluator.evaluate(request)).toEqual({ q: 0.8 });
+    expect(evaluator.inputTokens).toBe(1_000);
+    expect(await evaluator.evaluate(request)).toEqual({ q: 0.8 });
+    expect(evaluator.inputTokens).toBe(2_000);
+    // The ceiling is checked before the attempt, once reported usage has passed it.
+    await expect(evaluator.evaluate(request)).rejects.toMatchObject({ kind: "token-limit" });
+    expect(calls).toBe(2);
+    expect(evaluator.requests).toBe(2);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("budgets reject non-positive limits instead of silently disabling them", () => {
+  const options = {
+    apiKey: "fixture",
+    provider: "vercel" as const,
+    signal: new AbortController().signal,
+  };
+  for (const requestLimit of [0, -1, 1.5, Number.NaN])
+    expect(() => createEvaluator({ ...options, requestLimit })).toThrow(
+      "Request limit must be a positive integer",
+    );
+  for (const tokenLimit of [0, -1, 1.5, Number.NaN])
+    expect(() => createEvaluator({ ...options, tokenLimit })).toThrow(
+      "Token limit must be a positive integer",
+    );
+});
+
 test("cancellation of a rate-limited request prevents further attempts", async () => {
   const controller = new AbortController();
   let calls = 0;

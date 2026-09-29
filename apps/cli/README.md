@@ -82,6 +82,24 @@ including retries. Waiting for a slot does not consume the request timeout, and
 queued source is revalidated before upload. This controls transport pressure,
 not relevance thresholds or cache identity.
 
+Every run reports what it spent in its first lines: provider requests, how many were
+served from the local cache, and the input tokens the provider reported. Multiply the
+token count by your provider's price per million input tokens for the cost of a run.
+Cached answers cost no tokens.
+
+Large repositories cost more, because discovery considers more files and selection
+runs per admitted file. A search first counts eligible files by listing directories
+only, then gives each file an opening preview sized so the whole tree stays inside a
+fixed text budget. Ordinary repositories keep the full 16 KiB opening per file; large
+ones take a smaller sample plus the file's declaration names, which screen a file
+across its whole length for fewer bytes than reading its start. `jg files ./project`
+reports the eligible count that sets this, without a key or a network call.
+
+Use `--max-requests N` or `--max-tokens N` to cap one query. Each ceiling is checked
+before the next request, so requests already in flight can exceed it slightly. A
+budget that runs out ends the run as `discovery incomplete` and still returns the
+evidence gathered so far, with the exhausted ceiling reported as an issue.
+
 An incomplete search reports one sanitized, unrecovered provider error alongside
 its issue counts, distinguishing HTTP failures, timeouts, and connection failures.
 A batch failure that recovers through splitting is not used as the diagnostic. The
