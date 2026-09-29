@@ -72,6 +72,65 @@ testIfDocker(
 );
 
 testIfDocker(
+  "excluded paths are never uploaded or returned",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-exclude-"));
+    const sent: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as { questions: Record<string, unknown> };
+        sent.push(JSON.stringify(body));
+        return Response.json({
+          answers: Object.fromEntries(
+            Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.9 }]),
+          ),
+        });
+      },
+    });
+    try {
+      await mkdir(join(root, "src/generated"), { recursive: true });
+      await writeFile(
+        join(root, "src/events.ts"),
+        "export class Events { record(name:string) {return name;} }\n",
+      );
+      await writeFile(
+        join(root, "src/events.test.ts"),
+        'export const excludedTest = "DO_NOT_UPLOAD_TEST";\n',
+      );
+      await writeFile(
+        join(root, "src/generated/client.ts"),
+        'export const excludedClient = "DO_NOT_UPLOAD_GENERATED";\n',
+      );
+      const signal = new AbortController().signal;
+      const evaluator = createEvaluator({
+        apiKey: "fixture",
+        provider: "vercel",
+        fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+        signal,
+      });
+      const result = await retrieve(
+        {
+          root,
+          query: "research event recording",
+          policy: { exclude: ["*.test.ts", "src/generated/"] },
+          signal,
+        },
+        evaluator,
+      );
+      expect(result.status).toBe("complete");
+      expect(result.files.map((file) => file.path)).toEqual(["src/events.ts"]);
+      expect(sent.join("\n")).not.toContain("DO_NOT_UPLOAD");
+      expect(sent.join("\n")).not.toContain("generated");
+    } finally {
+      server.stop(true);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+testIfDocker(
   "newly ignored evidence is withheld from follow-up requests and returned excerpts",
   async () => {
     const root = await mkdtemp(join(tmpdir(), "jg-ignore-change-"));
@@ -108,7 +167,9 @@ testIfDocker(
               }
             }
             if (state.selectedEvidence) followups.push(state);
-            return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9]));
+            return Object.fromEntries(
+              Object.keys(request.questions).map((id) => [id, /^q\d+$/.test(id) ? 0.8 : 0.9]),
+            );
           },
         },
       );
@@ -185,18 +246,21 @@ testIfDocker(
             const state = request.state as { selectedEvidence?: Array<{ path: string }> };
             if (state.selectedEvidence) {
               followups++;
-              if (followups > 8 && state.selectedEvidence.some((entry) => entry.path === "0.ts"))
+              if (followups > 1 && state.selectedEvidence.some((entry) => entry.path === "0.ts"))
                 staleUploads++;
               if (!changed) {
                 changed = true;
                 await writeFile(join(root, ".ignore"), "0.ts\n");
               }
             }
-            return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9]));
+            return Object.fromEntries(
+              Object.keys(request.questions).map((id) => [id, /^q\d+$/.test(id) ? 0.8 : 0.9]),
+            );
           },
         },
       );
       expect(changed).toBe(true);
+      expect(followups).toBeGreaterThan(1);
       expect(staleUploads).toBe(0);
       expect(result.status).toBe("incomplete");
       expect(result.files.find((file) => file.path === "0.ts")?.excerpts).toEqual([]);
@@ -250,7 +314,7 @@ testIfDocker(
     try {
       await writeFile(
         join(root, "events.ts"),
-        Array.from({ length: 20 }, (_, i) => `export function event${i}() {return true;}\n`).join(
+        Array.from({ length: 400 }, (_, i) => `export function event${i}() {return true;}\n`).join(
           "",
         ),
       );
@@ -286,7 +350,7 @@ testIfDocker(
     try {
       await writeFile(
         join(root, "events.ts"),
-        Array.from({ length: 20 }, (_, i) => `export function event${i}() {return ${i};}\n`).join(
+        Array.from({ length: 400 }, (_, i) => `export function event${i}() {return ${i};}\n`).join(
           "",
         ),
       );
@@ -309,7 +373,7 @@ testIfDocker(
         .flatMap((file) => file.excerpts.map((excerpt) => excerpt.source))
         .join("\n");
       expect(source).toContain("function event0");
-      expect(source).not.toContain("function event19");
+      expect(source).not.toContain("function event399");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -442,4 +506,36 @@ testIfDocker(
     }
   },
   30_000,
+);
+
+testIfDocker(
+  "terminal refinement failures stop later files without discarding first-pass evidence",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-refinement-stop-"));
+    try {
+      for (const path of ["a.ts", "b.ts", "c.ts"])
+        await writeFile(join(root, path), "export function event() { return true; }\n");
+      let followups = 0;
+      const result = await retrieve(
+        { root, query: "event", signal: new AbortController().signal },
+        {
+          requests: 0,
+          async evaluate(request) {
+            if ((request.state as { selectedEvidence?: unknown }).selectedEvidence) {
+              followups++;
+              throw new EvaluationFailure("authentication");
+            }
+            return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.8]));
+          },
+        },
+      );
+      expect(followups).toBe(1);
+      expect(result.status).toBe("incomplete");
+      expect(result.files).toHaveLength(3);
+      expect(result.files.every((file) => file.selected.length > 0)).toBe(true);
+      expect(result.issues).toContainEqual({ kind: "authentication", count: 1 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
 );

@@ -4,9 +4,11 @@ The required outcome is equal or better official task solve rate with lower cost
 and elapsed time. Compare matched tasks within each engine before aggregating.
 A cheaper attempt is not a win if it lowers solve rate.
 
-Jev costs zero by explicit user instruction. Record its requests, bytes, tokens
-and latency separately as diagnostics; never add Jev tokens to coding-agent
-token totals. The context consumed by the coding agent still contributes to
+Task cost includes coding-agent and Jev costs by default. Report each component
+and their sum. Native TypeSafe Jev is estimated from recorded input usage at the
+public rate retained with the frozen runner; output is free under the current
+Jev 1.13 rate. Missing usage leaves the total unknown. Record Jev requests, bytes,
+tokens and latency separately; never add Jev tokens to coding-agent token totals. The context consumed by the coding agent still contributes to
 that agent's usage, and retrieval latency remains inside task wall time.
 
 Report native task-cost telemetry when available, labelled as telemetry rather

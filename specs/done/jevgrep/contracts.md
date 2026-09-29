@@ -25,8 +25,9 @@ jg --version
 ```
 
 Search flags: `--no-cache`, `--max-source-bytes N` (0 = unlimited excerpts),
-`--hidden`, `--no-ignore`, `--include-dependencies`, `--include-sensitive`.
-Each broadens only its named policy; no automatic blanket unrestricted switch.
+`--hidden`, `--no-ignore`, `--include-dependencies`, `--include-sensitive`,
+repeatable `--exclude PATTERN`. Each broadening flag widens only its named policy;
+no automatic blanket unrestricted switch. `--exclude` only narrows.
 A root beginning with `-` is accepted after `--`. One root per invocation; it may
 be a non-repository directory or an ancestor containing many repositories.
 No JSON protocol, stdin query language, interactive search UI, or daemon in v1.
@@ -151,6 +152,9 @@ patterns even outside a repository; closer rules override ancestors, `.ignore`
 wins at the same scope. Use directory-relative Git pattern syntax. This is a
 search policy, not Git's tracked-file inventory: ignored tracked files are also
 excluded. `--no-ignore` disables these patterns only. Do not read global Git config.
+`--exclude` patterns use the same syntax and case-insensitive matching relative to
+the root, apply after these rules and independently of `--no-ignore`, and cannot be
+re-admitted by them.
 At a nested repository boundary reset inherited `.gitignore` scope; ancestor
 `.ignore` remains applicable. Read parent rules only within the explicit root.
 

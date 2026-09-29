@@ -1,4 +1,4 @@
-"""Disposable query-assisted content windows. Never a file-admission filter."""
+"""Query-assisted source windows, paired with a declaration index for discovery."""
 import ast,json,sys,unicodedata
 
 def preview(query,path,text,budget=16384):

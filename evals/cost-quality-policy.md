@@ -1,9 +1,9 @@
-# Product evaluation: task completion and agent cost
+# Product evaluation: task completion and total cost
 
 Official SWE-bench task completion is the primary outcome. Compare a candidate
 with the preceding product version's saved benchmark evidence on matched tasks,
 and identify exactly which artifacts and protocols were measured. Report the
-full coding-agent cost per attempted task alongside quality; increased cost may
+full task cost (coding agent plus Jev) per attempted task alongside quality; increased cost may
 be an acceptable tradeoff for more completed tasks. Old spike cost-win counts,
 parity assertions and supplemental compatibility checks are not acceptance gates.
 
@@ -25,8 +25,11 @@ from confirmation runs; do not select favorable repetitions or combine the best
 result from different candidates for each task. Partial cohorts remain explicitly
 partial. An additional failure does not erase already verified solves.
 
-Jev tokens and cost are excluded from the scored coding-agent bill. Retrieved
-source does count toward the coding agent's context cost. Include unsuccessful
+Total scored task cost includes both coding-agent and Jev charges by default.
+Keep their cost components separate. Native TypeSafe usage is priced at the
+retained public model rate and clearly labelled as an estimate; Gateway metadata
+is reported cost, not an invoice. Jev tokens remain separate from coding-agent
+token totals. Retrieved source counts toward the coding agent's context cost. Include unsuccessful
 attempts; unknown charges are unknown, never zero. Preserve infrastructure failures
 and investigate them separately from product failures. Supplemental observations
 can explain behavior but do not rewrite official solve results.

@@ -319,7 +319,7 @@ class InstalledTests(unittest.TestCase):
             for index,item in enumerate(plan['cells']):
                 out=self.receipt(path,item)
                 runner.write_json(out/'grading-receipt.json',{'run_id':'jg-'+item['cell']['id'],'exit_code':0,'resolved_instances':int(item['baseline_resolved'])})
-                runner.write_json(out/'generation-accounting.json',{'cell':item['cell']['id'],'all_requests_accounted':index<7,'gateway_cost_usd':0.01 if index<7 else None,'known_gateway_cost_usd':0.01})
+                runner.write_json(out/'generation-accounting.json',{'cell':item['cell']['id'],'all_requests_accounted':index<7,'gateway_cost_usd':0.01 if index<7 else None,'known_gateway_cost_usd':0.01,'task_cost_complete':index<7,'task_cost_usd':0.02 if index<7 else None})
             with contextlib.redirect_stdout(io.StringIO()):result=runner.aggregate(argparse.Namespace(plan=path))
             self.assertEqual(result['official_solves'],8);self.assertEqual(result['baseline_solves_preserved'],8)
             self.assertEqual(result['fully_billed_solved_cost_wins'],7);self.assertIsNone(result['fully_billed_total_usd'])
@@ -376,7 +376,7 @@ class InstalledTests(unittest.TestCase):
             self.assertTrue(result['complete']);self.assertEqual(result['observed_cost_usd'],0.03)
             self.assertEqual(result['client_calls'],2);self.assertEqual(result['provider_attempts'],3)
             self.assertEqual(result['input_tokens'],20);self.assertEqual(result['output_tokens'],4)
-            self.assertFalse(result['included_in_scored_task_cost'])
+            self.assertTrue(result['included_in_scored_task_cost'])
 
     def test_jev_missing_invalid_or_unfinished_responses_leave_total_unknown(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -395,6 +395,19 @@ class InstalledTests(unittest.TestCase):
             events[-1]['transportError']='Interrupted'
             self.assertIsNone(runner.observed_jev(root,events,True,True)['observed_cost_usd'])
 
+    def test_jev_retained_bill_counts_when_client_disconnects_after_response_capture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);events=self.jev_fixture(root)
+            events[-1]['transportError']='BrokenPipeError'
+            events[-1]['responseBytes']=0
+            result=runner.observed_jev(root,events,True,True)
+            self.assertTrue(result['complete'])
+            self.assertEqual(result['observed_cost_usd'],0.03)
+            self.assertEqual(result['input_tokens'],20)
+            response=root/'jev-traces'/('1'*32+'.response.json')
+            response.write_text('{')
+            self.assertFalse(runner.observed_jev(root,events,True,True)['complete'])
+
     def test_retained_jev_cost_survives_missing_log_or_request_start(self):
         for missing_log in [True, False]:
             with self.subTest(missing_log=missing_log),tempfile.TemporaryDirectory() as temporary:
@@ -412,7 +425,7 @@ class InstalledTests(unittest.TestCase):
                 self.assertEqual(result['known_provider_attempts'],3)
                 self.assertFalse(result['complete']);self.assertIsNone(result['observed_cost_usd'])
 
-    def test_observed_jev_cost_does_not_change_scored_sol_cost_win(self):
+    def test_jev_cost_changes_total_task_cost_win(self):
         with tempfile.TemporaryDirectory() as temporary:
             path,plan=self.fixture(Path(temporary));out=self.receipt(path,plan)
             events=self.jev_fixture(out)
@@ -429,7 +442,8 @@ class InstalledTests(unittest.TestCase):
             with patch.object(runner.urllib.request,'urlopen',side_effect=AssertionError('No network')),contextlib.redirect_stdout(io.StringIO()):
                 runner.account(argparse.Namespace(plan=path,task=None))
             result=json.loads((out/'generation-accounting.json').read_text())
-            self.assertEqual(result['gateway_cost_usd'],0.1);self.assertTrue(result['successful_cost_win'])
+            self.assertEqual(result['gateway_cost_usd'],0.1);self.assertFalse(result['successful_cost_win'])
+            self.assertAlmostEqual(result['task_cost_usd'],100.12)
             self.assertEqual(result['jev']['observed_cost_usd'],100.02)
 
     def test_native_usage_survives_missing_cost(self):
@@ -444,6 +458,21 @@ class InstalledTests(unittest.TestCase):
                 self.assertEqual(result['input_tokens'],22);self.assertEqual(result['output_tokens'],6)
                 self.assertEqual(result['observed_cost_usd'],float(cost)*2 if cost in ('0.04','0') else None)
                 self.assertEqual(result['complete'],cost in ('0.04','0'))
+
+    def test_native_list_price_estimate_requires_full_usage_and_known_model(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);events=self.jev_fixture(root)
+            for index in range(2):
+                response=root/'jev-traces'/(str(index)*32+'.response.json')
+                runner.write_json(response,{'model':'jev-1.13.0','usage':{'input_tokens':1_000_000,'output_tokens':500}})
+                events[index*2+1]['responseBytes']=response.stat().st_size
+            result=runner.observed_jev(root,events,True,True,'typesafe')
+            self.assertTrue(result['complete']);self.assertAlmostEqual(result['observed_cost_usd'],0.084)
+            self.assertEqual(result['cost_kind'],'estimate')
+            response.write_text('{}');events[-1]['responseBytes']=response.stat().st_size
+            result=runner.observed_jev(root,events,True,True,'typesafe')
+            self.assertFalse(result['complete']);self.assertIsNone(result['observed_cost_usd'])
+            self.assertAlmostEqual(result['known_cost_usd'],0.042)
 
     def test_preload_is_required_and_identity_checked(self):
         with tempfile.TemporaryDirectory() as temporary:

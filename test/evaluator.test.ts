@@ -553,3 +553,83 @@ test("custom cache identity keeps endpoints and models separate from presets", a
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("native token pacing preserves concurrent small calls and excludes queue time from timeout", async () => {
+  const arrivals: Array<{ at: number; tokens: number }> = [];
+  let active = 0;
+  let peak = 0;
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const body = (await request.json()) as { state: string };
+      const tokens = body.state.length > 1000 ? 60_000 : 100;
+      arrivals.push({ at: performance.now(), tokens });
+      peak = Math.max(peak, ++active);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      active--;
+      return Response.json({
+        answers: { q: { type: "noul", noul: 0.8 } },
+        usage: { input_tokens: tokens, output_tokens: 1 },
+      });
+    },
+  });
+  try {
+    const evaluator = createEvaluator({
+      provider: "typesafe",
+      apiKey: "fixture",
+      signal: new AbortController().signal,
+      timeoutMs: 500,
+      fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+    });
+    const values = await Promise.all(
+      Array.from({ length: 32 }, (_, i) =>
+        evaluator.evaluate({
+          state: i < 24 ? "small" : "x".repeat(65_000),
+          questions: { q: { type: "boolean", instructions: "Relevant?" } },
+        }),
+      ),
+    );
+    expect(values.every((value) => value.q === 0.8)).toBe(true);
+    expect(peak).toBeGreaterThan(4);
+    expect(arrivals).toHaveLength(32);
+    for (const start of arrivals) {
+      // Leave a few milliseconds for loopback transport scheduling jitter.
+      const tokens = arrivals
+        .filter((entry) => entry.at >= start.at && entry.at < start.at + 990)
+        .reduce((sum, entry) => sum + entry.tokens, 0);
+      expect(tokens).toBeLessThanOrEqual(250_000);
+    }
+  } finally {
+    server.stop(true);
+  }
+}, 10_000);
+
+test("token-queued requests revalidate source after waiting", async () => {
+  let calls = 0;
+  let stale = false;
+  const evaluator = createEvaluator({
+    provider: "typesafe",
+    apiKey: "fixture",
+    signal: new AbortController().signal,
+    fetch: async () => {
+      calls++;
+      stale = true;
+      return Response.json({ answers: { q: { type: "noul", noul: 0.8 } } });
+    },
+  });
+  const request = {
+    state: "x".repeat(65_000),
+    questions: { q: { type: "boolean" as const, instructions: "Relevant?" } },
+  };
+  const running = Array.from({ length: 3 }, () => evaluator.evaluate(request));
+  const queued = evaluator
+    .evaluate(request, {
+      beforeAttempt: async () => {
+        if (stale) throw new EvaluationFailure("source-invalid");
+      },
+    })
+    .catch((error) => error);
+  await Promise.all(running);
+  expect(await queued).toMatchObject({ kind: "source-invalid" });
+  expect(calls).toBe(3);
+});

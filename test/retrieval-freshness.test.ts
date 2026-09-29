@@ -24,7 +24,7 @@ testIfDocker(
             await new Promise<void>((resolve) => {
               releases.push(resolve);
               if (releases.length === 8)
-                void writeFile(join(root, ".ignore"), "large.txt\n").then(() =>
+                void writeFile(join(root, ".ignore"), "large-*.txt\n").then(() =>
                   releases.forEach((release) => release()),
                 );
             });
@@ -37,7 +37,8 @@ testIfDocker(
       },
     });
     try {
-      await writeFile(join(root, "large.txt"), "QUEUED_SENTINEL line\n".repeat(26000));
+      for (let i = 0; i < 48; i++)
+        await writeFile(join(root, `large-${i}.txt`), "QUEUED_SENTINEL line\n".repeat(800));
       const signal = new AbortController().signal;
       const result = await retrieve(
         { root, query: "sentinel", signal },
@@ -275,7 +276,11 @@ for (const donor of ["sample", "anchor"] as const)
                 id,
                 {
                   type: "noul",
-                  noul: body.state.items?.[index]?.kind === "file" ? 0.9 : 0.1,
+                  noul:
+                    body.state.items?.[index]?.kind === "file" ||
+                    body.state.items?.[index]?.path === "deep"
+                      ? 0.9
+                      : 0.1,
                 },
               ]),
             ),
@@ -331,7 +336,10 @@ testIfDocker(
         }
         return Response.json({
           answers: Object.fromEntries(
-            Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.9 }]),
+            Object.keys(body.questions).map((id) => [
+              id,
+              { type: "noul", noul: /^q\d+$/.test(id) ? 0.8 : 0.9 },
+            ]),
           ),
         });
       },

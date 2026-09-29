@@ -40,7 +40,17 @@ piece could be re-skinned for any other project, it has failed.
    high-quality H.264, 320k AAC), reveal it in Finder, and commit the project
    to the repo as a standalone package, with renders and generated audio
    ignored and a short README covering commands, the timing principle, and the
-   claims disclosure to preserve.
+   claim sources and methodology kept outside the film.
+
+## Marketing, not a white paper
+
+Lead with the product and a few memorable benefits. Keep methodology, sample
+sizes, missing-data allowances, benchmark caveats and source citations in the
+package README or linked report, not in the video or key art. Do not add fine
+print, asterisk footnotes, disclaimer blocks or defensive narration. If a claim
+needs narrowing to stay true, narrow the headline itself; never use tiny text
+to rescue a misleading headline. Review each frame for reading burden as well
+as visual quality.
 
 ## Show, don't tell
 
@@ -89,9 +99,9 @@ into explainer or demo:
 - **Judge effects in a rendered frame, never the live preview.** Frame-by-frame
   renderers (Remotion's manual advance, for one) can silently drop a post
   stack or a canvas layer that looks fine live.
-- **Claims stay exact.** Restate measured results with their disclosure (sample
-  size, exclusions, tradeoffs) in small type; never round or generalize past
-  the source.
+- **Claims stay exact.** Verify headline claims against the source and keep
+  their scope clear in the headline. Preserve supporting evidence in the
+  docs; follow the marketing rule above for what belongs on screen.
 - **You cannot listen.** Verify the mix by measurement (integrated loudness
   around −11 to −14 LUFS, and a spectrogram showing risers and impacts at their
   cue times), and say in the handoff that the audio was checked by measurement,

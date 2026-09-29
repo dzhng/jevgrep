@@ -1,6 +1,6 @@
 {
   "name": "@dzhng/jevgrep",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Content-aware source retrieval for coding agents",
   "license": "MIT",
   "repository": {

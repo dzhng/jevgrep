@@ -112,3 +112,23 @@ test("concurrency is a positive search-only limit and does not change cache poli
   for (const args of [["doctor"], ["auth"], ["skill"], ["cache", "clear"]])
     expect(() => parseCommand([...args, "--concurrency", "2"])).toThrow();
 });
+
+test("exclude patterns are repeatable, normalized for cache identity, and search-only", () => {
+  expect(
+    parseCommand([
+      "question",
+      "--exclude",
+      "src/**/*.test.ts",
+      "--exclude",
+      "admin/",
+      "--exclude=admin/",
+    ]),
+  ).toMatchObject({ kind: "search", policy: { exclude: ["admin/", "src/**/*.test.ts"] } });
+  expect(parseCommand(["question", "--no-ignore", "--exclude", "docs"])).toMatchObject({
+    policy: { noIgnore: true, exclude: ["docs"] },
+  });
+  for (const pattern of ["", " ", "!keep.ts", "#note", "a\nb", "secrets\\", "\\"])
+    expect(() => parseCommand(["question", "--exclude", pattern])).toThrow("--exclude");
+  for (const args of [["doctor"], ["auth"], ["skill"], ["cache", "clear"]])
+    expect(() => parseCommand([...args, "--exclude", "docs"])).toThrow();
+});

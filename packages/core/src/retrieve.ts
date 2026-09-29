@@ -352,31 +352,53 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
               items.push(buffered({ path: entry.path, kind: "file", filePreview }, [source]));
               continue;
             }
-            const chunks = splitSource(source, 12_000);
-            for (const chunk of chunks) {
-              const text = sourceForUnit(source, chunk);
-              items.push(
-                buffered(
-                  {
-                    path: entry.path,
-                    kind: "file",
-                    filePreview: {
-                      sizeBytes: Buffer.byteLength(source.source),
-                      extension: extname(entry.path),
-                      text,
-                      previewBytes: Buffer.byteLength(text),
-                      truncated: chunks.length > 1,
-                      range: "sampled source ranges",
-                    },
-                  },
-                  [source],
-                ),
-              );
-            }
+            items.push(buffered({ path: entry.path, kind: "file", filePreview }, [source]));
           }
         }
       }
-      for (const { item, score: probability } of await score(items, anchor)) {
+      const previewsToScore: NavigationItem[] = [];
+      const previewsToExpand: NavigationItem[] = [];
+      for (const item of items) {
+        if (
+          item.kind === "file" &&
+          item.filePreview &&
+          item.filePreview.sizeBytes <= 1_000_000 &&
+          Buffer.byteLength(JSON.stringify(navigationRequest(input.query, [item], anchor))) > 38_000
+        )
+          previewsToExpand.push(item);
+        else previewsToScore.push(item);
+      }
+      const classified = await score(previewsToScore, anchor);
+      const remaining: NavigationItem[] = [];
+      for (const item of previewsToExpand) {
+        const filePreview = item.filePreview!;
+        const source = await unchanged({ path: item.path, contentHash: hashes.get(item.path)! });
+        if (!source) continue;
+        // Requests too large for preview scoring are split into bounded chunks.
+        // Otherwise admission uses the preview; unseen source may still be relevant.
+        for (const chunk of splitSource(source, 12_000)) {
+          const text = sourceForUnit(source, chunk);
+          remaining.push(
+            buffered(
+              {
+                path: item.path,
+                kind: "file",
+                filePreview: {
+                  sizeBytes: filePreview.sizeBytes,
+                  extension: filePreview.extension,
+                  text,
+                  previewBytes: Buffer.byteLength(text),
+                  truncated: true,
+                  range: "sampled source ranges",
+                },
+              },
+              [source],
+            ),
+          );
+        }
+      }
+      classified.push(...(await score(remaining, anchor)));
+      for (const { item, score: probability } of classified) {
         if (item.kind === "directory") {
           if (probability > 0.5) directories.push(item.path);
           else if (!anchor) pruned.set(item.path, item);
@@ -493,8 +515,8 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
           excerpts: [],
           sourceOmitted: false,
         });
-      const select = async (evidence?: () => Promise<Evidence[] | undefined>) =>
-        parallel(ordered, async (candidate) => {
+      const select = async (evidence?: () => Promise<Evidence[] | undefined>) => {
+        const selectCandidate = async (candidate: (typeof ordered)[number]) => {
           const source = await unchanged(candidate);
           if (!source) return;
           if (Buffer.byteLength(source.source) > 1_000_000) {
@@ -532,7 +554,14 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
           for (const entry of selection.issues)
             if (entry.kind !== "source-invalid")
               issue(entry.kind, entry.count, selection.providerFailure);
-        });
+        };
+        if (evidence) {
+          for (const candidate of ordered) {
+            if (stop || input.signal.aborted) break;
+            await selectCandidate(candidate);
+          }
+        } else await parallel(ordered, selectCandidate);
+      };
       const selectEvidence = async () => {
         await select();
         const evidence: Evidence[] = [];
@@ -689,8 +718,6 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     const context = await repositoryContext(
       reader,
       sortedCandidates().map((candidate) => files.get(candidate.path)!),
-      declarations,
-      (path) => unchanged(candidates.get(path)!),
     );
     // File assessment may outlive the bytes it classified, for every language.
     for (const candidate of candidates.values()) await unchanged(candidate);

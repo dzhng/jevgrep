@@ -1,0 +1,25 @@
+{
+  "name": "jevgrep-release-film",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.tsx",
+    "music": "node scripts/score.mjs",
+    "render": "npm run music && remotion render src/index.tsx Release out/jevgrep-0.5-short.mp4 --crf=14 --x264-preset=slow --audio-bitrate=320k --concurrency=4",
+    "draft": "npm run music && remotion render src/index.tsx Release out/draft.mp4 --scale=.5 --crf=20 --concurrency=4",
+    "stills": "node scripts/stills.mjs",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.529",
+    "remotion": "4.0.529",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "@remotion/bundler": "4.0.529",
+    "@remotion/renderer": "4.0.529"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "typescript": "^5.9.3"
+  }
+}
