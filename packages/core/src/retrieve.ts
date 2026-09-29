@@ -292,10 +292,25 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       preview.declarations = syntax.units
         .filter((unit) => !unit.partial)
         .map((unit) => ({ name: unit.name, ...unit.range }));
-      while (preview.declarations.length && Buffer.byteLength(JSON.stringify(preview)) > 32000) {
-        preview.declarations.pop();
+      // Keep the longest prefix of declarations that fits. Serialized size grows with each entry,
+      // so a binary search finds the same prefix as removing one declaration at a time.
+      const all = preview.declarations;
+      const fits = (count: number) => {
+        preview.declarations = all.slice(0, count);
+        return Buffer.byteLength(JSON.stringify(preview)) <= 32000;
+      };
+      if (all.length && !fits(all.length)) {
+        // Removal measured every shorter prefix with the truncation flag already set.
         preview.declarationIndexTruncated = true;
-      }
+        let low = 0,
+          high = all.length - 1;
+        while (low < high) {
+          const middle = Math.ceil((low + high) / 2);
+          if (fits(middle)) low = middle;
+          else high = middle - 1;
+        }
+        preview.declarations = all.slice(0, low);
+      } else preview.declarations = all;
     }
     return preview;
   }

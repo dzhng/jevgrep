@@ -414,3 +414,27 @@ test("oversized class context split into blocks stays out of leads", async () =>
   expect(result.file.selected.length).toBeGreaterThan(0);
   expect(result.file.leads.map((lead) => lead.name)).toEqual(["Big.method"]);
 });
+
+test("excerpts follow long comment blocks and stop at the first line of code", async () => {
+  for (const [path, marker, fn] of [
+    ["notes.py", "#", "def target():\n    return 1\n"],
+    ["notes.ts", "//", "export function target() {\n  return 1;\n}\n"],
+  ] as const) {
+    const block = Array.from({ length: 5000 }, (_, i) => `${marker} note ${i}`).join("\n");
+    const source = `${marker} unrelated\nconst_or_code = 1\n${block}\n\n${fn}\n${marker} trailing\n`;
+    const lines = source.split("\n");
+    const result = await selectFile(
+      { path, contentHash: path, source },
+      "target",
+      0.9,
+      evaluator((d) => (d.name === "target" ? 0.9 : 0)),
+    );
+    // The whole block, separated from the function only by a blank line, joins the excerpt;
+    // the comment above the line of code does not.
+    const excerpt = result.file.excerpts[0]!;
+    expect(excerpt.range.startLine).toBe(3);
+    expect(lines[excerpt.range.startLine - 1]).toBe(`${marker} note 0`);
+    expect(excerpt.source).toContain(`${marker} trailing`);
+    expect(excerpt.source).not.toContain(`${marker} unrelated`);
+  }
+});

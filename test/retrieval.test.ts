@@ -740,3 +740,59 @@ for (const [layout, source, expected] of [
       await rm(root, { recursive: true, force: true });
     }
   });
+
+testIfDocker(
+  "a large declaration index keeps its longest prefix that fits the preview",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-declaration-index-"));
+    try {
+      const count = 3000;
+      await writeFile(
+        join(root, "client.ts"),
+        Array.from(
+          { length: count },
+          (_, i) => `export function op${i}(a: number) { return a + ${i}; }\n`,
+        ).join(""),
+      );
+      const previews: Array<{ declarations?: unknown[]; declarationIndexTruncated?: boolean }> = [];
+      await retrieve(
+        { root, query: "op behavior", signal: new AbortController().signal },
+        {
+          requests: 0,
+          async evaluate(request) {
+            const state = request.state as {
+              items?: Array<{ filePreview?: (typeof previews)[number] }>;
+            };
+            for (const item of state.items ?? [])
+              if (item.filePreview) previews.push(item.filePreview);
+            return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.1]));
+          },
+        },
+      );
+      const preview = previews[0]!;
+      const kept = preview.declarations!.length;
+      expect(preview.declarationIndexTruncated).toBe(true);
+      expect(kept).toBeGreaterThan(0);
+      expect(kept).toBeLessThan(count);
+      expect(preview.declarations).toEqual(
+        Array.from({ length: kept }, (_, i) => ({
+          name: `op${i}`,
+          startLine: i + 1,
+          endLine: i + 1,
+        })),
+      );
+      // The index keeps the longest prefix: one more declaration would not fit.
+      expect(Buffer.byteLength(JSON.stringify(preview))).toBeLessThanOrEqual(32000);
+      const longer = {
+        ...preview,
+        declarations: [
+          ...preview.declarations!,
+          { name: `op${kept}`, startLine: kept + 1, endLine: kept + 1 },
+        ],
+      };
+      expect(Buffer.byteLength(JSON.stringify(longer))).toBeGreaterThan(32000);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);

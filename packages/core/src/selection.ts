@@ -342,36 +342,43 @@ export async function selectFile(
       throw error;
     warn("cancelled");
   }
+  // nonBlankThrough[n] counts lines 1..n that contain non-whitespace, so a gap check is O(1).
+  const nonBlankThrough = [0];
+  for (const text of lines) nonBlankThrough.push(nonBlankThrough.at(-1)! + (text.trim() ? 1 : 0));
+  const blankLines = (first: number, last: number) =>
+    last < first ||
+    nonBlankThrough[Math.min(last, lines.length)]! ===
+      nonBlankThrough[Math.min(Math.max(first, 1) - 1, lines.length)]!;
   function excerptsFor(ranges: Range[], rendered: Span[]) {
     const windows = ranges.map((range) => ({
       startLine: Math.max(1, range.startLine - 3),
       endLine: Math.min(lines.length, range.endLine + 3),
     }));
     for (const window of windows) {
+      // A window absorbs comments it overlaps or that border it across blank lines, until none
+      // qualify. Absorption only grows the window, so every order reaches the same closure.
+      // Ascending passes absorb chains after the window, descending passes chains before it.
+      const absorb = (comment: Range) => {
+        const qualifies =
+          (comment.startLine <= window.endLine && comment.endLine >= window.startLine) ||
+          (comment.endLine < window.startLine &&
+            blankLines(comment.endLine + 1, window.startLine - 1)) ||
+          (comment.startLine > window.endLine &&
+            blankLines(window.endLine + 1, comment.startLine - 1));
+        if (!qualifies) return false;
+        const start = Math.min(window.startLine, comment.startLine),
+          end = Math.max(window.endLine, comment.endLine);
+        if (start === window.startLine && end === window.endLine) return false;
+        window.startLine = start;
+        window.endLine = end;
+        return true;
+      };
       let changed = true;
       while (changed) {
         changed = false;
-        for (const comment of syntax.comments) {
-          const before =
-            comment.endLine < window.startLine &&
-            lines.slice(comment.endLine, window.startLine - 1).every((line) => !line.trim());
-          const after =
-            comment.startLine > window.endLine &&
-            lines.slice(window.endLine, comment.startLine - 1).every((line) => !line.trim());
-          if (
-            (comment.startLine <= window.endLine && comment.endLine >= window.startLine) ||
-            before ||
-            after
-          ) {
-            const start = Math.min(window.startLine, comment.startLine),
-              end = Math.max(window.endLine, comment.endLine);
-            if (start !== window.startLine || end !== window.endLine) {
-              window.startLine = start;
-              window.endLine = end;
-              changed = true;
-            }
-          }
-        }
+        for (const comment of syntax.comments) if (absorb(comment)) changed = true;
+        for (let index = syntax.comments.length - 1; index >= 0; index--)
+          if (absorb(syntax.comments[index]!)) changed = true;
       }
       let segmentStart = offsets[window.startLine - 1]!;
       for (let line = window.startLine; line <= window.endLine; line++) {
