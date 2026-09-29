@@ -329,3 +329,46 @@ test("same-named classes retain their own structural headers", async () => {
     ]);
   }
 });
+
+test("generated TypeScript deeper than the call stack parses or falls back to text", async () => {
+  const { sourceForUnit } = await import("../../packages/core/src/source.ts");
+  // A long flat expression nests one level per operator in the syntax tree.
+  const chain = "// generated\nexport const table = " + "1 + ".repeat(50_000) + "1;\n";
+  const parsed = await inspect(
+    { path: "chain.ts", source: chain, contentHash: "fixture" },
+    { maxUnitBytes: Buffer.byteLength(chain) },
+  );
+  assert.equal(parsed.mode, "typescript");
+  assert.deepEqual(
+    parsed.units.map(({ name, range }) => ({ name, ...range })),
+    [{ name: "table", startLine: 2, endLine: 2 }],
+  );
+  assert.deepEqual(parsed.comments, [{ startLine: 1, endLine: 1 }]);
+  const nested = "export const x = " + "(".repeat(20_000) + "1" + ")".repeat(20_000) + ";\n";
+  const snapshot = { path: "nested.ts", source: nested, contentHash: "fixture" };
+  const fallback = await inspect(snapshot, { maxUnitBytes: 3000 });
+  assert.equal(fallback.mode, "text");
+  assert.equal(fallback.fallback, "syntax");
+  assert.equal(fallback.units.map((unit) => sourceForUnit(snapshot, unit)).join(""), nested);
+});
+
+test("Python nested beyond the query depth falls back quickly while wide files parse", async () => {
+  const { sourceForUnit } = await import("../../packages/core/src/source.ts");
+  // One level per `+`: past 65,535 levels Tree-sitter queries miss matches and slow down sharply.
+  const deep = "def f():\n    return 1\nvalue = " + "1+".repeat(100_000) + "1\n";
+  const snapshot = { path: "generated.py", source: deep, contentHash: "fixture" };
+  const started = performance.now();
+  const result = await inspect(snapshot, { maxUnitBytes: 3000 });
+  assert.ok(performance.now() - started < 10_000, "deep source was not rejected quickly");
+  assert.equal(result.mode, "text");
+  assert.equal(result.fallback, "syntax");
+  assert.equal(result.units.map((unit) => sourceForUnit(snapshot, unit)).join(""), deep);
+  // Many statements or elements make a wide tree, not a deep one.
+  const wide =
+    "def f():\n    return 1\n" +
+    Array.from({ length: 30_000 }, (_, i) => `x${i} = [${i}, ${i}]`).join("\n") +
+    "\n";
+  const parsed = await inspect({ path: "wide.py", source: wide, contentHash: "fixture" });
+  assert.equal(parsed.mode, "python");
+  assert.equal(parsed.units[0]?.name, "f");
+});

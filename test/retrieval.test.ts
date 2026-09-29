@@ -539,3 +539,46 @@ testIfDocker(
     }
   },
 );
+
+testIfDocker(
+  "unparseable generated files do not fail the search or other files' parsing",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-unparseable-"));
+    try {
+      await mkdir(join(root, "src"), { recursive: true });
+      await writeFile(
+        join(root, "src/nested.ts"),
+        "export const x = " + "(".repeat(20_000) + "1" + ")".repeat(20_000) + ";\n",
+      );
+      await writeFile(join(root, "src/generated.py"), "value = " + "1+".repeat(100_000) + "1\n");
+      await writeFile(
+        join(root, "src/events.py"),
+        "class Events:\n    def record(self, name):\n        return name\n",
+      );
+      await writeFile(
+        join(root, "src/events.ts"),
+        "export class Events {\n  record(name: string) {\n    return name;\n  }\n}\n",
+      );
+      const result = await retrieve(
+        { root, query: "event recording", signal: new AbortController().signal },
+        {
+          requests: 0,
+          async evaluate(request) {
+            return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9]));
+          },
+        },
+      );
+      expect(result.status).toBe("complete");
+      const leads = (path: string) =>
+        result.files.find((file) => file.path === path)?.leads.map((lead) => lead.name);
+      // Healthy files keep declaration parsing; unparseable ones fall back to text.
+      expect(leads("src/events.py")).toContain("Events.record");
+      expect(leads("src/events.ts")).toContain("Events.record");
+      for (const path of ["src/nested.ts", "src/generated.py"])
+        expect(result.files.find((file) => file.path === path)?.excerpts.length).toBeGreaterThan(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);

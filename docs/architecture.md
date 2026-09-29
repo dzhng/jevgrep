@@ -49,7 +49,10 @@ source bytes; never reconstruct returned code from the tree.
 
 Tree-sitter recognizes syntax rather than validating CPython semantics. Trees
 with syntax errors use text fallback. Bare-CR Python also uses text fallback
-because retrieval coordinates count LF lines. Repository source is never executed.
+because retrieval coordinates count LF lines. So does generated source nested
+beyond what a parser handles: TypeScript that exhausts the call stack, and Python
+nested more than 50,000 levels, near where Tree-sitter queries stop matching and
+slow down sharply. Repository source is never executed.
 See [parser contracts](../test/parser/README.md) and
 [measurement evidence](../specs/tree-sitter/RESULTS.md).
 

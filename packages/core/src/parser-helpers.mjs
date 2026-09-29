@@ -23,6 +23,10 @@ async function parse(source, action, languageName = "python") {
     parser.setLanguage(languages.get(languageName));
     tree = parser.parse(source);
     if (!tree || tree.rootNode.hasError) return null;
+    // Tree-sitter queries stop reporting matches beyond 65,535 levels of nesting and slow down
+    // sharply near that depth: 70,000 chained `+` took 8 s, 100,000 took 74 s. Treat such
+    // generated source as unparseable, like a syntax error, before any query runs.
+    if (languageName === "python" && deeperThan(tree, maxTreeDepth)) return null;
     if (languageName === "python" && !validPython(tree.rootNode)) return null;
     return action(tree.rootNode);
   } finally {
@@ -31,6 +35,27 @@ async function parse(source, action, languageName = "python") {
   }
 }
 const field = (n, name) => n.childForFieldName(name);
+// Well below the query engine's 65,535-level limit; ordinary source nests far less.
+const maxTreeDepth = 50_000;
+/** Visits every node with a tree cursor, which neither recurses nor allocates node objects. */
+function deeperThan(tree, limit) {
+  const cursor = tree.walk();
+  try {
+    let depth = 0;
+    for (;;) {
+      if (cursor.gotoFirstChild()) {
+        if (++depth > limit) return true;
+        continue;
+      }
+      while (!cursor.gotoNextSibling()) {
+        if (!cursor.gotoParent()) return false;
+        depth--;
+      }
+    }
+  } finally {
+    cursor.delete();
+  }
+}
 function unparenthesized(node) {
   while (node?.type === "parenthesized_expression")
     node = node.namedChildren.find((child) => child.type !== "comment");

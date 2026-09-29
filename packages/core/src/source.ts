@@ -127,7 +127,14 @@ export async function inspect(
         : /\.[cm]?js$/.test(path)
           ? ts.ScriptKind.JS
           : ts.ScriptKind.TS;
-    const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, kind);
+    let file: ts.SourceFile;
+    try {
+      file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, kind);
+    } catch (error) {
+      // Deeply nested source can exhaust the parser's call stack: unparseable here, like a syntax error.
+      if (error instanceof RangeError) return fallback("syntax");
+      throw error;
+    }
     syntaxFallback = !!(file as ts.SourceFile & { parseDiagnostics?: unknown[] }).parseDiagnostics
       ?.length;
     const line = (position: number) => file.getLineAndCharacterOfPosition(position).line + 1;
@@ -157,15 +164,23 @@ export async function inspect(
         });
     };
     if (!syntaxFallback) for (const statement of file.statements) add(statement);
-    const visit = (node: ts.Node) => {
+    // Pre-order walk with an explicit stack: long generated expressions nest deeper than the call
+    // stack allows. Children are pushed in reverse so they are visited in source order.
+    const walk: ts.Node[] = [file];
+    while (walk.length) {
+      const node = walk.pop()!;
       for (const comment of [
         ...(ts.getLeadingCommentRanges(source, node.getFullStart()) ?? []),
         ...(ts.getTrailingCommentRanges(source, node.end) ?? []),
       ])
         comments.push({ startLine: line(comment.pos), endLine: line(comment.end - 1) });
-      ts.forEachChild(node, visit);
-    };
-    visit(file);
+      const children: ts.Node[] = [];
+      // The callback must return undefined: a truthy result stops forEachChild early.
+      ts.forEachChild(node, (child) => {
+        children.push(child);
+      });
+      for (let index = children.length - 1; index >= 0; index--) walk.push(children[index]!);
+    }
     mode = "typescript";
   } else if (/\.(go|rs)$/.test(path)) {
     const parsed = await runParser<{ units: typeof units; comments: Range[] }>(
