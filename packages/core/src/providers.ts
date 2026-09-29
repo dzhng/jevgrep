@@ -50,14 +50,21 @@ export function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && Object.hasOwn(providers, value);
 }
 
+/** Every saved-provider name, in the order auth offers them; custom stays last. */
+export const credentialProviders: CredentialProvider[] = [
+  ...(Object.keys(providers) as ProviderId[]),
+  cloudflareProviderId,
+  customProviderId,
+];
+
 export function isCredentialProvider(value: unknown): value is CredentialProvider {
-  return value === customProviderId || value === cloudflareProviderId || isProviderId(value);
+  return credentialProviders.includes(value as CredentialProvider);
 }
 
 const loopbackHosts = new Set(["localhost", "127.0.0.1"]);
 
 export function validateBaseURL(value: unknown): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error("Provide a base URL for the custom endpoint.");
+  if (typeof value !== "string" || !value.trim()) throw new Error("Provide the endpoint base URL.");
   const baseURL = value.trim();
   let url: URL;
   try {
@@ -94,8 +101,6 @@ function customEndpoint(selection: ProviderSelection): ProviderEndpoint {
 
 function cloudflareEndpoint(selection: ProviderSelection): ProviderEndpoint {
   // The route is appended to the gateway URL, so a trailing slash would double it.
-  if (typeof selection.baseURL !== "string" || !selection.baseURL.trim())
-    throw new Error("Provide your Cloudflare AI Gateway URL.");
   const baseURL = validateBaseURL(selection.baseURL).replace(/\/+$/, "");
   // A URL copied from a provider route would double the route Jevgrep appends.
   if (/\/(workers-ai|compat)(\/|$)/.test(new URL(baseURL).pathname))

@@ -12,16 +12,19 @@ the suite. No npm release or paid benchmark was run.
 | Installed journey `cloudflare` | Pass: auth with `--base-url`, doctor, cold and warm search, replacement by Vercel, unauthorized doctor                                |
 | Evaluator mutation checks      | Sending the token as `Authorization`, dropping `redirect: "error"`, or accepting any envelope state each fails its own evaluator test |
 
+The repository's `review` closeout (refactor-clean, code-review, write-docs) and
+`audit-choices` ran over the full change; the gates above were rerun on the result.
 `oxfmt --check .` reports only upstream files outside this change.
 
 Live checks used the built development CLI with an isolated `XDG_CONFIG_HOME` and a
 token scoped to Account > AI Gateway Run only, against a gateway custom domain:
 
-| Check                                                               | Result                                                                     |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `jg auth --provider cloudflare --base-url <custom domain>/ --stdin` | Saved `{provider, baseURL, apiKey}` with the trailing slash removed        |
-| `jg doctor`                                                         | `Jev connection verified through Cloudflare AI Gateway (<custom domain>).` |
-| Search over `packages/core/src` for where the gateway header is set | Exit 0 in 2s; `evaluator.ts` first with `cloudflareTransport`'s source     |
+| Check                                                                | Result                                                                     |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `jg auth --provider cloudflare --base-url <custom domain>/ --stdin`  | Saved `{provider, baseURL, apiKey}` with the trailing slash removed        |
+| `jg doctor`                                                          | `Jev connection verified through Cloudflare AI Gateway (<custom domain>).` |
+| Search over `packages/core/src` for where the gateway header is set  | Exit 0 in 2s; `evaluator.ts` first with `cloudflareTransport`'s source     |
+| `jg auth ... --base-url <custom domain>/workers-ai/run/typesafe/jev` | Exit 1 before reading the key: asks for the gateway URL without the route  |
 
 The first implementation (before the merge) was also verified live against
 `https://gateway.ai.cloudflare.com/v1/ACCOUNT/GATEWAY` and with an invalid token

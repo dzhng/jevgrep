@@ -71,7 +71,9 @@ TypeSafe-compatible path, so it is its own provider instead of a custom endpoint
 Choose “Cloudflare AI Gateway” in `auth` and enter the gateway URL, either
 `https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY` or the gateway's custom
 domain, then a token with the account's AI Gateway Run permission. Jev is billed
-through Cloudflare Unified Billing. For piped setup:
+through Cloudflare Unified Billing. The
+[Cloudflare provider record](../../specs/done/cloudflare-provider/README.md) explains
+the route and its invariants. For piped setup:
 
 ```sh
 jg auth --provider cloudflare --base-url https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY --stdin

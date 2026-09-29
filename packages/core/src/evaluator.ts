@@ -133,8 +133,8 @@ export function createEvaluator(options: {
         namespace: {
           model: endpoint.model,
           provider: options.provider,
-          endpoint: cloudflareRoute ?? endpoint.baseURL,
-          protocol: cloudflareRoute ? "typesafe-ai-3.0.8+workers-ai-run" : "typesafe-ai-3.0.8",
+          endpoint: endpoint.baseURL,
+          protocol: "typesafe-ai-3.0.8",
           policyVersion: options.policyVersion ?? "1",
           parserVersion: "tree-sitter-0.27.0-python-0.25.0-go-0.25.0-rust-0.24.0-ts-5.9.3",
           promptVersion: "unit-locators-1",
@@ -306,7 +306,8 @@ async function cloudflareTransport(
   route: string,
   init: RequestInit | undefined,
 ): Promise<Response> {
-  const { model: _model, ...input } = JSON.parse(String(init?.body));
+  const input = JSON.parse(String(init?.body));
+  delete input.model;
   const headers = new Headers(init?.headers);
   const authorization = headers.get("authorization");
   headers.delete("authorization");
@@ -319,18 +320,8 @@ async function cloudflareTransport(
     redirect: "error",
   });
   if (!response.ok) return response;
-  const envelope: unknown = await response.json();
+  const envelope = (await response.json()) as { state?: unknown; result?: unknown } | null;
   // Only a Completed envelope carries an answer; anything else fails answer validation.
-  const answer =
-    envelope &&
-    typeof envelope === "object" &&
-    "state" in envelope &&
-    envelope.state === "Completed" &&
-    "result" in envelope
-      ? envelope.result
-      : null;
-  const responseHeaders = new Headers(response.headers);
-  responseHeaders.delete("content-length");
-  responseHeaders.delete("content-encoding");
-  return Response.json(answer, { status: response.status, headers: responseHeaders });
+  const answer = envelope?.state === "Completed" ? (envelope.result ?? null) : null;
+  return Response.json(answer, { status: response.status });
 }

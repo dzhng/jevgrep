@@ -50,9 +50,9 @@ things the other providers do not combine:
   body of `{state: "Completed", result}` yields an answer. Any other state, a missing
   `result` or a bare unwrapped answer fails validation as an invalid answer. It is never
   treated as negative evidence.
-- Answer-cache identity uses the full Workers AI endpoint and a distinct protocol tag
-  (`typesafe-ai-3.0.8+workers-ai-run`). Answers from another provider or another
-  gateway never certify this route.
+- Answer-cache identity needs nothing Cloudflare-specific: the namespace already
+  carries `provider: "cloudflare"` and the normalized gateway URL, so answers from
+  another provider or another gateway never certify this route.
 
 ## Pointers
 

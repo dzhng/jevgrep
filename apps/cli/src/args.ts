@@ -2,15 +2,13 @@ import { parseArgs } from "node:util";
 import type { SearchInput } from "@repo/core";
 import {
   cloudflareProviderId,
+  credentialProviders,
   customProviderId,
   isCredentialProvider,
-  providers,
 } from "@repo/core/providers";
 import { CliError } from "./errors";
 import { DEFAULT_MAX_SOURCE_BYTES } from "./render";
 import type { AuthOptions } from "./auth";
-
-const credentialProviders = [...Object.keys(providers), cloudflareProviderId, customProviderId];
 
 export type Command =
   | { kind: "help" | "version" | "doctor" | "cache-clear" }

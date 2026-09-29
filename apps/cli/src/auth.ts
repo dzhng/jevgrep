@@ -6,6 +6,7 @@ import { isCancel, password, select, text } from "@clack/prompts";
 import {
   cloudflareProviderId,
   cloudflareProviderLabel,
+  credentialProviders,
   customProviderId,
   customProviderLabel,
   endpointFor,
@@ -56,9 +57,9 @@ function customEndpoint(options: AuthOptions): CustomEndpoint {
 }
 
 /** Validate and normalize a Cloudflare gateway URL the way the evaluator will use it. */
-function cloudflareGateway(baseURL: unknown): string {
+function cloudflareGateway(baseURL: string | undefined): string {
   try {
-    return endpointFor({ provider: cloudflareProviderId, baseURL: baseURL as string }).baseURL;
+    return endpointFor({ provider: cloudflareProviderId, baseURL }).baseURL;
   } catch (error) {
     throw new CliError(invalid(error));
   }
@@ -171,22 +172,19 @@ export async function authenticate(options: AuthOptions, signal: AbortSignal) {
   } else {
     if (!process.stdin.isTTY)
       throw new CliError(
-        `Use auth --provider ${[
-          ...Object.keys(providers),
-          cloudflareProviderId,
-          customProviderId,
-        ].join("|")} --stdin to read a piped key.`,
+        `Use auth --provider ${credentialProviders.join("|")} --stdin to read a piped key.`,
       );
     const selected = await select<CredentialProvider>({
       message: "Choose your Jev provider",
-      options: [
-        ...(Object.keys(providers) as ProviderId[]).map((value) => ({
-          value,
-          label: providers[value].label,
-        })),
-        { value: cloudflareProviderId, label: cloudflareProviderLabel },
-        { value: customProviderId, label: customProviderLabel },
-      ],
+      options: credentialProviders.map((value) => ({
+        value,
+        label:
+          value === customProviderId
+            ? customProviderLabel
+            : value === cloudflareProviderId
+              ? cloudflareProviderLabel
+              : providers[value].label,
+      })),
       output: process.stdout,
       signal,
     });
