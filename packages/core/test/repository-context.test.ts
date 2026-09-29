@@ -7,7 +7,7 @@ import { createFilesystem } from "../src/filesystem";
 import { repositoryContext } from "../src/repository-context";
 import type { FileEvidence } from "../src/types";
 
-test("reference repository context reports scoped guidance and only selected pytest test entries", async () => {
+test("repository context reports scoped guidance and marks excluded instructions incomplete", async () => {
   const root = await mkdtemp(join(tmpdir(), "jg-context-"));
   await mkdir(join(root, "a/b"), { recursive: true });
   await mkdir(join(root, "unrelated"));
@@ -29,26 +29,14 @@ test("reference repository context reports scoped guidance and only selected pyt
     ],
     sourceOmitted: false,
   };
-  const declarations = new Map([
-    [file.path, [{ name: "test_behavior", range: { startLine: 3, endLine: 4 } }]],
-  ]);
   try {
-    const readCurrent = async (path: string) => {
-      const value = await reader.readSnapshot(path);
-      return value.status === "ok" ? value.snapshot : undefined;
-    };
-    expect(await repositoryContext(reader, [file], declarations, readCurrent)).toEqual({
+    expect(await repositoryContext(reader, [file])).toEqual({
       instructionFiles: ["AGENTS.md", "a/b/AGENTS.md", "a/AGENTS.md"],
       instructionLookupIncomplete: false,
-      pytestFiles: [file.path],
     });
-    file.rendered = [{ startLine: 1, endLine: 1 }];
-    expect(
-      (await repositoryContext(reader, [file], declarations, readCurrent)).pytestFiles,
-    ).toEqual([]);
     await rm(join(root, "a/b/AGENTS.md"));
     await symlink(join(root, "unrelated/AGENTS.md"), join(root, "a/b/AGENTS.md"));
-    const unsafe = await repositoryContext(reader, [file], declarations, readCurrent);
+    const unsafe = await repositoryContext(reader, [file]);
     expect(unsafe.instructionFiles).toEqual(["AGENTS.md", "a/AGENTS.md"]);
     expect(unsafe.instructionLookupIncomplete).toBe(true);
     expect(await reader.lookupFile("missing.md")).toEqual({

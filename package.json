@@ -14,7 +14,7 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "bun apps/cli/src/index.ts",
+    "dev": "bun scripts/parser-assets.mjs && bun apps/cli/src/index.ts",
     "build": "turbo build",
     "check-types": "turbo check-types",
     "lint": "turbo lint",

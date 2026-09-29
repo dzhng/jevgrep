@@ -155,6 +155,69 @@ test("policy overrides are independent and never admit protected storage or bina
   }
 });
 
+test("pages count skipped entries by reason and report file sizes", async () => {
+  const root = await fixture({
+    ".gitignore": "ignored.txt\n",
+    "ignored.txt": "ignored",
+    "node_modules/pkg.js": "dependency",
+    ".env": "secret",
+    "sized.ts": "12345",
+    "dir/inner.ts": "x",
+  });
+  const reader = await createFilesystem({ root });
+  try {
+    const page = await reader.listPage();
+    expect(page.entries.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
+      { path: "dir", kind: "directory" },
+      { path: "sized.ts", kind: "file", bytes: 5 },
+    ]);
+    expect(page.excluded).toEqual({ hidden: 2, ignored: 1, dependency: 1 });
+  } finally {
+    await reader.close();
+  }
+});
+
+test("exclude patterns only narrow eligibility, even with --no-ignore and repository negations", async () => {
+  const root = await fixture({
+    ".gitignore": "!keep.test.ts\n",
+    "src/app.ts": "application",
+    "src/app.test.ts": "test",
+    "keep.test.ts": "repository negation",
+    "admin/page.ts": "admin",
+    "admin/nested/deep.ts": "nested admin",
+    "docs/guide.md": "guide",
+  });
+  const reader = await createFilesystem({ root, policy: { exclude: ["*.test.ts", "admin/"] } });
+  try {
+    for (const path of ["src/app.ts", "docs/guide.md"])
+      expect(await reader.readSnapshot(path)).toMatchObject({ status: "ok" });
+    for (const path of ["src/app.test.ts", "keep.test.ts", "admin/page.ts", "admin/nested/deep.ts"])
+      expect(await reader.readSnapshot(path)).toMatchObject({
+        status: "excluded",
+        reason: "exclude_pattern",
+      });
+    expect((await reader.listPage()).entries.map((entry) => entry.path).sort()).toEqual([
+      "docs",
+      "src",
+    ]);
+  } finally {
+    await reader.close();
+  }
+  const unignored = await createFilesystem({
+    root,
+    policy: { noIgnore: true, exclude: ["docs/**"] },
+  });
+  try {
+    expect(await unignored.readSnapshot("docs/guide.md")).toMatchObject({
+      status: "excluded",
+      reason: "exclude_pattern",
+    });
+    expect(await unignored.readSnapshot("src/app.test.ts")).toMatchObject({ status: "ok" });
+  } finally {
+    await unignored.close();
+  }
+});
+
 test("root normalization does not follow descendant links or special files and permission errors stay issues", async () => {
   const root = await fixture({ visible: "ok", unreadable: "unreadable sentinel" });
   const outside = await fixture({ outside: "OUTSIDE_SENTINEL" });

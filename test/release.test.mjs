@@ -8,7 +8,7 @@ const metadata = {
   publishConfig: { access: "public" },
   license: "MIT",
   engines: { node: ">=22" },
-  dependencies: { typescript: "5.9.3", pyodide: "0.25.1" },
+  dependencies: { typescript: "5.9.3", "web-tree-sitter": "0.27.0" },
 };
 test("release tags select the authored version and keep prereleases off latest", () => {
   assert.deepEqual(releaseIdentity(metadata, "v1.2.3"), {
@@ -88,11 +88,25 @@ test("archive validation rejects changed skill bytes and accidental source paylo
     "apps/cli/package.json": JSON.stringify(metadata),
     LICENSE: "MIT canonical copyright\n",
     "skills/jevgrep/SKILL.md": "Use jg for unfamiliar code.\n",
-    "packages/core/src/python-worker.mjs": "// worker fixture",
     ...Object.fromEntries(
-      ["inspect", "preview", "neighborhood", "calls"].map((name) => [
-        `packages/core/assets/python/${name}.py`,
-        `# ${name} helper fixture`,
+      ["parser-worker", "parser-helpers", "parser-preview", "parser-declarations"].map((name) => [
+        `packages/core/src/${name}.mjs`,
+        "// fixture",
+      ]),
+    ),
+    "packages/core/package.json": JSON.stringify({
+      devDependencies: Object.fromEntries(
+        ["python", "go", "rust"].map((name) => [`tree-sitter-${name}`, "1.0.0"]),
+      ),
+    }),
+    ...Object.fromEntries(
+      ["python", "go", "rust"].flatMap((name) => [
+        [
+          `packages/core/node_modules/tree-sitter-${name}/package.json`,
+          JSON.stringify({ name: `tree-sitter-${name}`, version: "1.0.0", license: "MIT" }),
+        ],
+        [`packages/core/node_modules/tree-sitter-${name}/LICENSE`, "MIT fixture grammar license"],
+        [`packages/core/assets/tree-sitter/tree-sitter-${name}.wasm`, `${name} grammar fixture`],
       ]),
     ),
   };
@@ -104,44 +118,47 @@ test("archive validation rejects changed skill bytes and accidental source paylo
     pkg = join(archiveRoot, "package");
   await mkdir(join(pkg, "dist/bin"), { recursive: true });
   await mkdir(join(pkg, "dist/skills/jevgrep"), { recursive: true });
-  await mkdir(join(pkg, "dist/assets/python"), { recursive: true });
+  await mkdir(join(pkg, "dist/assets/tree-sitter"), { recursive: true });
   for (const [from, to] of [
     ["apps/cli/package.json", "package.json"],
     ["LICENSE", "dist/LICENSE"],
     ["skills/jevgrep/SKILL.md", "dist/skills/jevgrep/SKILL.md"],
-    ["packages/core/src/python-worker.mjs", "dist/bin/python-worker.mjs"],
-    ...["inspect", "preview", "neighborhood", "calls"].map((name) => [
-      `packages/core/assets/python/${name}.py`,
-      `dist/assets/python/${name}.py`,
+    ...["parser-worker", "parser-helpers", "parser-preview", "parser-declarations"].map((name) => [
+      `packages/core/src/${name}.mjs`,
+      `dist/bin/${name}.mjs`,
+    ]),
+    ...["python", "go", "rust"].map((name) => [
+      `packages/core/assets/tree-sitter/tree-sitter-${name}.wasm`,
+      `dist/assets/tree-sitter/tree-sitter-${name}.wasm`,
     ]),
   ])
     await cp(join(root, from), join(pkg, to));
   await writeFile(join(pkg, "dist/bin/index.js"), '#!/usr/bin/env node\nconsole.log("jg");\n');
   await chmod(join(pkg, "dist/bin/index.js"), 0o755);
-  const { pythonRuntimeNotices } = await import("../scripts/package-notices.mjs");
+  const { grammarAssets } = await import("../scripts/parser-assets.mjs");
   await writeFile(
     join(pkg, "dist/THIRD_PARTY_NOTICES.txt"),
     "Third-party notices for bundled JavaScript dependencies\n\n=== example@1.0.0 (MIT) ===\nFixture license\n" +
-      (await pythonRuntimeNotices("0.25.1")),
+      (await grammarAssets(root)),
   );
   const tarball = join(root, "package.tgz"),
     pack = () => execute("tar", ["-czf", tarball, "-C", archiveRoot, "package"]);
   const { validateRelease } = await import("../scripts/validate-release.mjs");
   await pack();
   assert.equal((await validateRelease(tarball, "v1.2.3", root)).version, "1.2.3");
-  await writeFile(join(pkg, "dist/bin/python-worker.mjs"), "changed worker");
+  await writeFile(join(pkg, "dist/bin/parser-worker.mjs"), "changed worker");
   await pack();
   await assert.rejects(validateRelease(tarball, "v1.2.3", root), /canonical source/);
   await cp(
-    join(root, "packages/core/src/python-worker.mjs"),
-    join(pkg, "dist/bin/python-worker.mjs"),
+    join(root, "packages/core/src/parser-worker.mjs"),
+    join(pkg, "dist/bin/parser-worker.mjs"),
   );
-  await rm(join(pkg, "dist/assets/python/inspect.py"));
+  await rm(join(pkg, "dist/assets/tree-sitter/tree-sitter-python.wasm"));
   await pack();
   await assert.rejects(validateRelease(tarball, "v1.2.3", root), /Missing packaged file/);
   await cp(
-    join(root, "packages/core/assets/python/inspect.py"),
-    join(pkg, "dist/assets/python/inspect.py"),
+    join(root, "packages/core/assets/tree-sitter/tree-sitter-python.wasm"),
+    join(pkg, "dist/assets/tree-sitter/tree-sitter-python.wasm"),
   );
   await writeFile(join(pkg, "dist/skills/jevgrep/SKILL.md"), "Changed skill");
   await pack();
@@ -157,13 +174,9 @@ test("archive validation rejects changed skill bytes and accidental source paylo
   await assert.rejects(validateRelease(tarball, "v1.2.3", root), /Unexpected published file/);
 });
 
-test("external Python runtime notices retain conflicting metadata and component provenance", async () => {
-  const { pythonRuntimeNotices } = await import("../scripts/package-notices.mjs");
-  const notices = await pythonRuntimeNotices("0.25.1");
-  assert.match(notices, /Mozilla Public License Version 2.0/);
-  assert.match(notices, /PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2/);
-  assert.match(notices, /CPython 3.11.3/);
-  assert.match(notices, /github.com\/pyodide\/pyodide\/tree\/0.25.1/);
-  assert.match(notices, /Apache License/);
-  await assert.rejects(pythonRuntimeNotices("0.26.0"), /Review Python runtime notices/);
+test("grammar notices retain all official parser licenses", async () => {
+  const { grammarAssets } = await import("../scripts/parser-assets.mjs");
+  const notices = await grammarAssets();
+  for (const name of ["python", "go", "rust"]) assert.ok(notices.includes(`tree-sitter-${name}@`));
+  assert.match(notices, /Permission is hereby granted/);
 });

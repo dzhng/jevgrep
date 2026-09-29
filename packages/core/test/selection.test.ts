@@ -95,9 +95,6 @@ test("valid contextual rejection retracts selection without promoting surroundin
     evaluator((_d, request) => {
       calls++;
       expect((request.state as { selectedEvidence: unknown }).selectedEvidence).toEqual(evidence);
-      expect(request.questions.ref0!.instructions).toContain(
-        "exact symbol, fixture object, or event handler explicitly referenced",
-      );
       return 0;
     }),
     async () => ({ evidence }),
@@ -111,16 +108,20 @@ test("valid contextual rejection retracts selection without promoting surroundin
 });
 
 test("provider failures retain successful groups and fatal failures stop subsequent groups", async () => {
-  const source = Array.from({ length: 20 }, (_, i) => `function f${i}() { return ${i}; }\n`).join(
+  const source = Array.from({ length: 400 }, (_, i) => `function f${i}() { return ${i}; }\n`).join(
     "",
   );
   for (const kind of ["provider", "authentication", "request-limit", "cancelled"] as const) {
     let calls = 0;
+    let rejected: Array<{ startLine: number; endLine: number }> = [];
     const fake: Evaluator = {
       requests: 0,
       async evaluate(request) {
         calls++;
-        if (calls === 2) throw new EvaluationFailure(kind);
+        if (calls === 2) {
+          rejected = (request.state as { declarations: typeof rejected }).declarations;
+          throw new EvaluationFailure(kind);
+        }
         return Object.fromEntries(Object.keys(request.questions).map((key) => [key, 0.9]));
       },
     };
@@ -131,15 +132,17 @@ test("provider failures retain successful groups and fatal failures stop subsequ
       fake,
     );
     expect(result.issues).toEqual([{ kind, count: 1 }]);
-    expect(calls).toBe(kind === "provider" ? 3 : 2);
-    expect(result.file.selected).toEqual(
-      kind === "provider"
-        ? [
-            { startLine: 1, endLine: 8 },
-            { startLine: 17, endLine: 20 },
-          ]
-        : [{ startLine: 1, endLine: 8 }],
-    );
+    if (kind === "provider") expect(calls).toBeGreaterThan(2);
+    else expect(calls).toBe(2);
+    expect(result.file.selected[0]?.startLine).toBe(1);
+    expect(result.file.selected.some((range) => range.endLine === 400)).toBe(kind === "provider");
+    expect(rejected.length).toBeGreaterThan(0);
+    for (const failed of rejected)
+      expect(
+        result.file.selected.some(
+          (range) => range.startLine <= failed.endLine && range.endLine >= failed.startLine,
+        ),
+      ).toBe(false);
   }
 });
 

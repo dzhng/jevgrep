@@ -16,11 +16,14 @@
     "@ai-sdk/typesafe-ai": "3.0.8",
     "ai": "7.0.107",
     "ignore": "7.0.5",
-    "pyodide": "0.25.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "web-tree-sitter": "0.27.0"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
-    "@types/node": "22"
+    "@types/node": "22",
+    "tree-sitter-python": "0.25.0",
+    "tree-sitter-go": "0.25.0",
+    "tree-sitter-rust": "0.24.0"
   }
 }

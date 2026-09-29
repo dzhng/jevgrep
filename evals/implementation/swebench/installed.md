@@ -14,6 +14,11 @@ on an internal network. The benchmark prompt explicitly invokes `$jevgrep`, as r
 the public skill itself teaches CLI usage without prescribing a research workflow. Retrieval limits come
 from the frozen package's default policy.
 
+New preparations use the current canonical `skills/jevgrep/SKILL.md` by default
+and reject a package carrying different skill bytes. Use `--skill` only for an
+explicitly identified comparison; existing frozen plans retain their original
+skill for reproducibility.
+
 The plan binds one package, installed prefix, skill, safe task export, evaluator
 dataset and archived runner/broker/registry sources before any treatment runs.
 Existing studies remain unchanged; their archived source records the procedure used.
@@ -107,8 +112,8 @@ Receipts retain work, credited retrieval and wall durations plus the disjoint
 credit intervals and native command IDs, so timing remains auditable.
 
 The recognizer accepts a direct installed `jg` search, including the native shell
-wrapper. It gives no credit to auth, doctor, cache, skill, help/version, compound
-commands, redirections or shell expansions. Ambiguous invocations count as work.
+wrapper. It recognizes search exclusions and gives no credit to files, auth,
+doctor, cache, skill, help/version, compound commands, redirections or shell expansions. Ambiguous invocations count as work.
 Event-observation timestamps measure what the harness sees, not provider execution
 time; malformed timing events invalidate the timing evidence rather than inventing
 credit. Process startup and time outside qualifying waits count toward work.

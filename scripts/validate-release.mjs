@@ -4,7 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { pythonRuntimeNotices } from "./package-notices.mjs";
+import { grammarAssets, grammars } from "./parser-assets.mjs";
 const execute = promisify(execFile);
 export const repository = fileURLToPath(new URL("../", import.meta.url));
 
@@ -30,7 +30,7 @@ export function releaseIdentity(metadata, tag) {
   for (const [name, version] of Object.entries(metadata.dependencies ?? {}))
     if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(version))
       throw new Error(`Runtime dependency ${name} must use an exact registry version`);
-  for (const name of ["typescript", "pyodide"])
+  for (const name of ["typescript", "web-tree-sitter"])
     if (!metadata.dependencies?.[name])
       throw new Error(`Missing runtime parser dependency ${name}`);
   return { name: metadata.name, version, distTag: match[4] ? "next" : "latest" };
@@ -48,9 +48,10 @@ export async function validateRelease(tarball, tag, root = repository) {
   if (new Set(files).size !== files.length) throw new Error("Duplicate archive entries");
   for (const path of files)
     if (
-      !/^package\/(?:package\.json|README(?:\.md)?|LICENSE|dist\/(?:bin\/(?:index\.js|python-worker\.mjs)|assets\/(?:python\/(?:inspect|preview|neighborhood|calls)\.py|README\.md)|skills\/jevgrep\/SKILL\.md|LICENSE|THIRD_PARTY_NOTICES\.txt))$/.test(
+      !/^package\/(?:package\.json|README(?:\.md)?|LICENSE|dist\/(?:bin\/(?:index\.js|parser-(?:worker|helpers|preview|declarations)\.mjs)|assets\/(?:README\.md)|skills\/jevgrep\/SKILL\.md|LICENSE|THIRD_PARTY_NOTICES\.txt))$/.test(
         path,
-      )
+      ) &&
+      !grammars.some((name) => path === `package/dist/assets/tree-sitter/tree-sitter-${name}.wasm`)
     )
       throw new Error(`Unexpected published file: ${path}`);
   const listing = await execute("tar", ["-tvzf", tarball], { maxBuffer: 8_000_000 });
@@ -76,10 +77,13 @@ export async function validateRelease(tarball, tag, root = repository) {
   for (const [packed, original] of [
     ["dist/LICENSE", "LICENSE"],
     ["dist/skills/jevgrep/SKILL.md", "skills/jevgrep/SKILL.md"],
-    ["dist/bin/python-worker.mjs", "packages/core/src/python-worker.mjs"],
-    ...["inspect", "preview", "neighborhood", "calls"].map((name) => [
-      `dist/assets/python/${name}.py`,
-      `packages/core/assets/python/${name}.py`,
+    ...["parser-worker", "parser-helpers", "parser-preview", "parser-declarations"].map((name) => [
+      `dist/bin/${name}.mjs`,
+      `packages/core/src/${name}.mjs`,
+    ]),
+    ...grammars.map((name) => [
+      `dist/assets/tree-sitter/tree-sitter-${name}.wasm`,
+      `packages/core/assets/tree-sitter/tree-sitter-${name}.wasm`,
     ]),
   ])
     if (!(await extract(packed)).equals(await readFile(resolve(root, original))))
@@ -88,7 +92,7 @@ export async function validateRelease(tarball, tag, root = repository) {
   if (
     !notices.startsWith("Third-party notices for bundled JavaScript dependencies\n") ||
     !notices.includes("=== ") ||
-    !notices.endsWith(await pythonRuntimeNotices(metadata.dependencies.pyodide))
+    !notices.endsWith(await grammarAssets(root))
   )
     throw new Error("Missing bundled dependency license notices");
   const integrity = `sha512-${createHash("sha512")

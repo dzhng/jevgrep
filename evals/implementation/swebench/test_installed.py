@@ -150,9 +150,9 @@ class InstalledTests(unittest.TestCase):
 
     def test_only_unambiguous_standalone_search_gets_credit(self):
         for command in ['jg "query with ; punctuation"', "/bin/sh -lc 'jg query'",
-                        'jg --no-cache "query" /testbed', '/opt/jg-install/bin/jg "query" --max-source-bytes=0']:
+                        'jg --no-cache "query" /testbed', 'jg "query" --exclude tests/ --exclude=src/generated/', '/opt/jg-install/bin/jg "query" --max-source-bytes=0']:
             with self.subTest(command=command): self.assertTrue(runner.direct_jg_search(command))
-        for command in ['jg', 'jg doctor', 'jg auth --stdin', 'jg cache clear', 'jg skill', 'jg --help',
+        for command in ['jg', 'jg files', 'jg files /testbed', 'jg files --exclude tests/', 'jg doctor', 'jg auth --stdin', 'jg cache clear', 'jg skill', 'jg --help',
                         'jg -h', 'jg --version', 'jg "query" --version', 'jg "query"; sleep 5',
                         'jg "query" && sleep 5', 'sleep 5 | jg "query"', 'jg "query" > out',
                         'jg "$(sleep 5)"', 'env KEY=value jg "query"', 'echo jg "query"', 'jg "query" &', 'jg doc*', 'jg auth?', 'jg {auth,doctor}',
@@ -394,6 +394,19 @@ class InstalledTests(unittest.TestCase):
                 self.assertFalse(result['complete']);self.assertIsNone(result['observed_cost_usd'])
             events[-1]['transportError']='Interrupted'
             self.assertIsNone(runner.observed_jev(root,events,True,True)['observed_cost_usd'])
+
+    def test_jev_retained_bill_counts_when_client_disconnects_after_response_capture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);events=self.jev_fixture(root)
+            events[-1]['transportError']='BrokenPipeError'
+            events[-1]['responseBytes']=0
+            result=runner.observed_jev(root,events,True,True)
+            self.assertTrue(result['complete'])
+            self.assertEqual(result['observed_cost_usd'],0.03)
+            self.assertEqual(result['input_tokens'],20)
+            response=root/'jev-traces'/('1'*32+'.response.json')
+            response.write_text('{')
+            self.assertFalse(runner.observed_jev(root,events,True,True)['complete'])
 
     def test_retained_jev_cost_survives_missing_log_or_request_start(self):
         for missing_log in [True, False]:

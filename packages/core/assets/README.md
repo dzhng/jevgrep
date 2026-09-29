@@ -1,11 +1,10 @@
-# Packaged Python helpers
+# Parser assets
 
-The Python helpers in `python/` inspect source as data. The standalone
-worker executes them with the pinned Pyodide CPython runtime, supplied by the
-normal npm dependency. The installed package includes the worker and helpers;
-Pyodide includes its interpreter WASM and standard library. Parsing requires no
-Python executable or runtime download.
+The build copies Python, Go and Rust grammar WASM from exact-version official
+Tree-sitter packages into `tree-sitter/`. The generated assets and their license
+notices ship in the CLI archive; searches never download a grammar. The external
+`web-tree-sitter` runtime supplies its own WASM and license.
 
-Helpers resolve relative to the worker module, independently of the working
-directory. Runtime source provenance and component licenses are retained in the
-package's `THIRD_PARTY_NOTICES.txt`; their source copies live in `scripts/licenses/`.
+[Asset preparation](../../../scripts/parser-assets.mjs) owns the copy and license
+provenance. It also prepares the canonical grammars used by release validation;
+a clean validation checkout must install the locked development dependencies first.

@@ -43,7 +43,6 @@ export type RetrievalResult = {
   repositoryContext: {
     instructionFiles: string[];
     instructionLookupIncomplete: boolean;
-    pytestFiles: string[];
   };
   counts: { requests: number; cacheHits: number; inspectedFiles: number };
 };

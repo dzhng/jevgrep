@@ -320,13 +320,20 @@ def direct_jg_search(command):
             elif options and arg.startswith('--max-source-bytes='):
                 if not arg.split('=', 1)[1].isdigit():
                     return False
+            elif options and arg == '--exclude':
+                index += 1
+                if index >= len(argv) or not argv[index]:
+                    return False
+            elif options and arg.startswith('--exclude='):
+                if not arg.split('=', 1)[1]:
+                    return False
             elif options and arg.startswith('-'):
                 return False
             else:
                 positionals.append(arg)
             index += 1
         return (1 <= len(positionals) <= 2 and bool(positionals[0].strip()) and
-                positionals[0] not in ('auth', 'doctor', 'cache', 'skill'))
+                positionals[0] not in ('auth', 'doctor', 'cache', 'skill', 'files'))
     except ValueError:
         return False
 
@@ -646,8 +653,16 @@ def observed_jev(out, events, log_valid, traces_copied, provider="vercel"):
                 coverage = False
                 continue
             end = matching[0]
-            if (end.get('status') != 200 or end.get('transportError') or end.get('incompleteStream') or
-                    end.get('responseBytes') != response.stat().st_size or end.get('requestBytes') != requests[identifier].stat().st_size):
+            # The broker captures each Jev chunk before writing it to the client.
+            # A client disconnect can therefore leave a complete bill in the trace
+            # even though responseBytes (delivered bytes) is smaller. Count that
+            # paid request, including its retries; malformed JSON still fails above.
+            captured_after_disconnect = (end.get('transportError') == 'BrokenPipeError' and
+                count(end.get('responseBytes')) and end['responseBytes'] <= response.stat().st_size)
+            if (end.get('status') != 200 or end.get('incompleteStream') or
+                    (not captured_after_disconnect and (end.get('transportError') or
+                        end.get('responseBytes') != response.stat().st_size)) or
+                    end.get('requestBytes') != requests[identifier].stat().st_size):
                 coverage = False
         except (OSError, ValueError, KeyError, TypeError, AttributeError, InvalidOperation):
             coverage = False
@@ -660,6 +675,7 @@ def observed_jev(out, events, log_valid, traces_copied, provider="vercel"):
             'pricing': pricing, 'cost_kind': 'estimate' if pricing else 'reported',
             'included_in_scored_task_cost': True, 'client_calls': len(ids), 'responses_with_cost': len(costs),
             'complete': complete, 'observed_cost_usd': known if complete else None, 'known_cost_usd': known,
+            'responses_with_client_disconnect': sum(event.get('transportError') == 'BrokenPipeError' for event in ends),
             'input_tokens': sum(inputs) if coverage and len(inputs) == len(ids) else None,
             'output_tokens': sum(outputs) if coverage and len(outputs) == len(ids) else None,
             'provider_attempts': sum(attempts) if coverage and len(attempts) == len(ids) else None,

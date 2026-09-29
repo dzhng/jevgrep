@@ -477,6 +477,73 @@ test("skill command delegates installation to npx without credentials", async (t
   assert.match(unavailable.stdout, /requires npx/);
 });
 
+test("installed Go/Rust search indexes late methods and selects their source instead of distant noise", async (t) => {
+  const fixture = await context(t, async ({ body, response }) => {
+    const answers = Object.fromEntries(
+      Object.keys(body.questions).map((id) => {
+        const match = /^(q|scope|ref)(\d+)$/.exec(id);
+        const selected =
+          body.state.declarations && match
+            ? match[1] === "scope" ||
+              (match[1] === "q" &&
+                body.state.declarations[Number(match[2])].name.endsWith(".record_event"))
+            : !id.startsWith("ref");
+        return [id, { type: "noul", noul: selected ? 0.95 : 0.05 }];
+      }),
+    );
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ answers }));
+    return true;
+  });
+  const files = [
+    [
+      "sample.go",
+      "package sample\n" +
+        Array.from(
+          { length: 160 },
+          (_, i) => `func noise${i}() string { return "DISTANT_NOISE_${i}_${"x".repeat(100)}" }\n`,
+        ).join("") +
+        'type Box struct {}\nfunc (b *Box) record_event() string { return "go-evidence" }\n',
+      "go-evidence",
+    ],
+    [
+      "sample.rs",
+      Array.from(
+        { length: 160 },
+        (_, i) => `fn noise${i}() -> &'static str { "DISTANT_NOISE_${i}_${"x".repeat(100)}" }\n`,
+      ).join("") +
+        'struct Box;\n#[allow(dead_code)]\nimpl Box {\n #[inline]\n pub fn record_event(&self) -> &str { "rust-evidence" }\n}\n',
+      "rust-evidence",
+    ],
+  ];
+  for (const [path, source] of files) await writeFile(join(fixture.tree, path), source);
+  const result = await fixture.run([query, fixture.tree, "--no-cache"]);
+  assert.equal(result.code, 0, result.stdout);
+  for (const [path, , marker] of files) {
+    assert.ok(
+      fixture.requests.some(
+        ({ body }) =>
+          body.state.path === path &&
+          body.state.preview?.truncated &&
+          body.state.preview.declarations?.some((d) => d.name === "Box.record_event"),
+      ),
+      `Missing late-method preview for ${path}`,
+    );
+    assert.ok(
+      fixture.requests.some(
+        ({ body }) =>
+          body.state.path === path &&
+          body.state.declarations?.some((d) => d.name === "Box.record_event"),
+      ),
+      `Missing named selection for ${path}`,
+    );
+    assert.ok(result.stdout.includes(marker), result.stdout);
+  }
+  assert.ok(result.stdout.includes("#[allow(dead_code)]"), result.stdout);
+  assert.ok(result.stdout.includes("#[inline]"), result.stdout);
+  assert.ok(!result.stdout.includes("DISTANT_NOISE_0_"), result.stdout);
+});
+
 test("actual installed search parses Python and returns every relevant hierarchy branch", async (t) => {
   const fixture = await context(t);
   const result = await fixture.run([query, fixture.tree, "--no-cache"]);
@@ -509,7 +576,9 @@ test("actual installed search parses Python and returns every relevant hierarchy
 test("search concurrency limits all stages against a busy provider", async (t) => {
   let active = 0;
   let peak = 0;
-  const fixture = await context(t, async ({ response }) => {
+  const pending = [];
+  let initialSelectionArrivals = 0;
+  const fixture = await context(t, async ({ body, response }) => {
     active++;
     peak = Math.max(peak, active);
     response.once("finish", () => active--);
@@ -518,7 +587,19 @@ test("search concurrency limits all stages against a busy provider", async (t) =
       response.end(JSON.stringify({ error: "Too many concurrent calls" }));
       return true;
     }
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    if (Array.isArray(body.state.declarations) && !body.state.selectedEvidence) {
+      initialSelectionArrivals++;
+      if (initialSelectionArrivals <= 2) {
+        await new Promise((resolve) => {
+          const deadline = setTimeout(resolve, 5000);
+          pending.push(() => {
+            clearTimeout(deadline);
+            resolve();
+          });
+          if (pending.length === 2) pending.forEach((release) => release());
+        });
+      }
+    }
     return false;
   });
   complete(await fixture.run([query, fixture.tree, "--concurrency", "2", "--no-cache"]));
@@ -984,27 +1065,54 @@ test("source budget preserves every file and lead while explicitly omitting sour
   assertCachedRequestsAreReused(fixture.requests, before);
 });
 
-test("missing or corrupt packaged Python assets fail closed without downloads", async (t) => {
+test("missing or corrupt packaged parser assets fail closed without downloads", async (t) => {
   const scratch = await mkdtemp(join(tmpdir(), "jg-missing-python-"));
   t.after(() => rm(scratch, { recursive: true, force: true }));
-  for (const [asset, corrupt] of [
-    ["dist/bin/python-worker.mjs", false],
-    ["dist/assets/python/inspect.py", false],
-    ["node_modules/pyodide/pyodide.asm.wasm", false],
-    ["node_modules/pyodide/python_stdlib.zip", false],
-    ["node_modules/pyodide/pyodide.asm.wasm", true],
+  for (const [asset, corrupt, extension] of [
+    ["dist/bin/parser-worker.mjs", false],
+    ["dist/assets/tree-sitter/tree-sitter-python.wasm", false],
+    ["node_modules/web-tree-sitter/web-tree-sitter.wasm", false],
+    ["dist/assets/tree-sitter/tree-sitter-python.wasm", true],
+    ["dist/assets/tree-sitter/tree-sitter-go.wasm", false, "go"],
+    ["dist/assets/tree-sitter/tree-sitter-go.wasm", true, "go"],
+    ["dist/assets/tree-sitter/tree-sitter-rust.wasm", false, "rs"],
+    ["dist/assets/tree-sitter/tree-sitter-rust.wasm", true, "rs"],
   ]) {
     const copy = join(scratch, "package");
     await cp(packageDirectory, copy, { recursive: true, dereference: true });
     await access(join(copy, asset));
     if (corrupt) await writeFile(join(copy, asset), "corrupt runtime fixture");
     else await rm(join(copy, asset));
-    const fixture = await context(t, "healthy", join(copy, "dist/bin/index.js"));
+    const fixture = await context(
+      t,
+      extension
+        ? async ({ body, response }) => {
+            response.writeHead(200, { "content-type": "application/json" });
+            response.end(
+              JSON.stringify({
+                answers: Object.fromEntries(
+                  Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.95 }]),
+                ),
+              }),
+            );
+            return true;
+          }
+        : "healthy",
+      join(copy, "dist/bin/index.js"),
+    );
+    if (extension)
+      await writeFile(
+        join(fixture.tree, `broken.${extension}`),
+        extension === "go" ? "package sample\nfunc record_event() {}\n" : "fn record_event() {}\n",
+      );
     const result = await fixture.run([query, fixture.tree, "--no-cache"]);
     assert.equal(result.code, 1, `${asset} (corrupt=${corrupt}): ${result.stdout}`);
     assert.ok(result.stdout.trim(), "Asset failure must produce a diagnostic");
     assert.ok(
-      !fixture.requests.some(({ body }) => body.state.declarations),
+      !fixture.requests.some(
+        ({ body }) =>
+          body.state.declarations && (!extension || body.state.path === `broken.${extension}`),
+      ),
       "Unavailable parser assets must not fabricate declaration evidence",
     );
     await fixture.removeCredentials();
@@ -1059,7 +1167,7 @@ test("installed queued freshness withholds excluded source uploads", async (t) =
         await new Promise((resolve) => {
           releases.push(resolve);
           if (releases.length === 8)
-            void writeFile(join(tree, ".ignore"), "large.txt\n").then(() =>
+            void writeFile(join(tree, ".ignore"), "large-*.txt\n").then(() =>
               releases.forEach((release) => release()),
             );
         });
@@ -1077,10 +1185,11 @@ test("installed queued freshness withholds excluded source uploads", async (t) =
   t.after(() => releases.forEach((release) => release()));
   await rm(fixture.tree, { recursive: true });
   await mkdir(fixture.tree);
-  await writeFile(
-    join(fixture.tree, "large.txt"),
-    "QUEUED_INSTALLED_SENTINEL line\n".repeat(18000),
-  );
+  for (let index = 0; index < 48; index++)
+    await writeFile(
+      join(fixture.tree, `large-${index}.txt`),
+      "QUEUED_INSTALLED_SENTINEL line\n".repeat(800),
+    );
   // Fill every provider slot before changing the policy, leaving later uploads queued.
   const result = await fixture.run([query, fixture.tree, "--concurrency", "8", "--no-cache"]);
   assert.equal(uploads, 8);

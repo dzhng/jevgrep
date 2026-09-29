@@ -1,0 +1,188 @@
+{
+  "protocol": "Two exploratory paired tasks; same CLI, source, model, prompts, provider and corrected work clock; only packaged skill differs. One attempt per arm/task.",
+  "cli_source_commit": "dd43534c891c5779eedcba50b3d40ae3edbeec7b",
+  "skill_sha256": {
+    "old": "82d4537183cb9219d60400df1d478ad0b213e14bf05bf6ae9b7f7e751dc3d935",
+    "new": "916bf51b9a57f1cb94d04dbd90d361f1190b6dabc0f9d1ca152d2469862a974c"
+  },
+  "cells": [
+    {
+      "task": "psf__requests-1142",
+      "arm": "old",
+      "status": "completed",
+      "official_solved": true,
+      "grade_report": "/Users/david/dev/jevgrep/evals/runs/tooling/swebench/logs/evaluation/jg-skill-requests-old-v2-pinned-platform/results.json",
+      "grading_recovered": true,
+      "cost_complete": true,
+      "total_usd": 0.29272813799999997,
+      "agent_usd": 0.2863362,
+      "jev_usd": 0.006391938,
+      "known_agent_usd": 0.2863362,
+      "timing": {
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_kind": null,
+        "wall_seconds": 74.39526695897803,
+        "work_seconds": 58.74530012597097,
+        "retrieval_wait_seconds": 15.649966833007056,
+        "credit_intervals": [
+          {
+            "start_seconds": 8.6868124169996,
+            "end_seconds": 24.336779250006657,
+            "command_ids": [
+              "item_2"
+            ]
+          }
+        ],
+        "timing_event_errors": 0
+      },
+      "agent_token_usage": [
+        {
+          "input_tokens": 216746,
+          "cached_input_tokens": 187053,
+          "cache_write_input_tokens": 29663,
+          "output_tokens": 3154,
+          "reasoning_output_tokens": 1519
+        }
+      ],
+      "evidence": "/Users/david/dev/jevgrep/evals/runs/skill-impact-2026-09-29/requests-old-v2/attempts/psf__requests-1142"
+    },
+    {
+      "task": "psf__requests-1142",
+      "arm": "new",
+      "status": "completed",
+      "official_solved": true,
+      "grade_report": "/Users/david/dev/jevgrep/evals/runs/tooling/swebench/logs/evaluation/jg-skill-requests-new-pinned-platform/results.json",
+      "grading_recovered": true,
+      "cost_complete": true,
+      "total_usd": 0.20895612800000002,
+      "agent_usd": 0.2034632,
+      "jev_usd": 0.005492928,
+      "known_agent_usd": 0.2034632,
+      "timing": {
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_kind": null,
+        "wall_seconds": 65.58349579200149,
+        "work_seconds": 49.57501416699961,
+        "retrieval_wait_seconds": 16.008481625001878,
+        "credit_intervals": [
+          {
+            "start_seconds": 8.87021837499924,
+            "end_seconds": 24.878700000001118,
+            "command_ids": [
+              "item_2"
+            ]
+          }
+        ],
+        "timing_event_errors": 0
+      },
+      "agent_token_usage": [
+        {
+          "input_tokens": 116447,
+          "cached_input_tokens": 94498,
+          "cache_write_input_tokens": 21928,
+          "output_tokens": 2797,
+          "reasoning_output_tokens": 1445
+        }
+      ],
+      "evidence": "/Users/david/dev/jevgrep/evals/runs/skill-impact-2026-09-29/requests-new/attempts/psf__requests-1142"
+    },
+    {
+      "task": "pytest-dev__pytest-6197",
+      "arm": "old",
+      "status": "completed",
+      "official_solved": true,
+      "grade_report": "/Users/david/dev/jevgrep/evals/runs/tooling/swebench/logs/evaluation/jg-installed-pytest-dev__pytest-6197-563b4f6313bb/results.json",
+      "grading_recovered": false,
+      "cost_complete": true,
+      "total_usd": 1.190029434,
+      "agent_usd": 1.1434104,
+      "jev_usd": 0.046619034,
+      "known_agent_usd": 1.1434104,
+      "timing": {
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_kind": null,
+        "wall_seconds": 306.988658999966,
+        "work_seconds": 269.7163303749985,
+        "retrieval_wait_seconds": 37.272328624967486,
+        "credit_intervals": [
+          {
+            "start_seconds": 9.96058895799797,
+            "end_seconds": 47.232917582965456,
+            "command_ids": [
+              "item_2"
+            ]
+          }
+        ],
+        "timing_event_errors": 0
+      },
+      "agent_token_usage": [
+        {
+          "input_tokens": 1394275,
+          "cached_input_tokens": 1330041,
+          "cache_write_input_tokens": 64138,
+          "output_tokens": 14516,
+          "reasoning_output_tokens": 9970
+        }
+      ],
+      "evidence": "/Users/david/dev/jevgrep/evals/runs/skill-impact-2026-09-29/pytest-old/attempts/pytest-dev__pytest-6197"
+    },
+    {
+      "task": "pytest-dev__pytest-6197",
+      "arm": "new",
+      "status": "completed",
+      "official_solved": true,
+      "grade_report": "/Users/david/dev/jevgrep/evals/runs/tooling/swebench/logs/evaluation/jg-installed-pytest-dev__pytest-6197-3ebfd911d4b8/results.json",
+      "grading_recovered": false,
+      "cost_complete": true,
+      "total_usd": 0.896717274,
+      "agent_usd": 0.856347,
+      "jev_usd": 0.040370274,
+      "known_agent_usd": 0.856347,
+      "timing": {
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_kind": null,
+        "wall_seconds": 227.74059166701045,
+        "work_seconds": 207.00520112604136,
+        "retrieval_wait_seconds": 20.735390540969092,
+        "credit_intervals": [
+          {
+            "start_seconds": 7.682393792027142,
+            "end_seconds": 28.417784332996234,
+            "command_ids": [
+              "item_2"
+            ]
+          }
+        ],
+        "timing_event_errors": 0
+      },
+      "agent_token_usage": [
+        {
+          "input_tokens": 947284,
+          "cached_input_tokens": 891040,
+          "cache_write_input_tokens": 56175,
+          "output_tokens": 10939,
+          "reasoning_output_tokens": 7811
+        }
+      ],
+      "evidence": "/Users/david/dev/jevgrep/evals/runs/skill-impact-2026-09-29/pytest-new/attempts/pytest-dev__pytest-6197"
+    }
+  ],
+  "trigger_report": "/Users/david/dev/jevgrep/evals/runs/skill-trigger-2026-09-29/REPORT.md",
+  "rollout_manifest": "/Users/david/dev/jevgrep/evals/runs/skill-rollout-2026-09-29/manifest.json",
+  "totals": {
+    "old": {
+      "official_solves": 2,
+      "graded_tasks": 2,
+      "total_usd": 1.482757572
+    },
+    "new": {
+      "official_solves": 2,
+      "graded_tasks": 2,
+      "total_usd": 1.105673402
+    }
+  }
+}

@@ -18,3 +18,6 @@ __pycache__/
 
 # Deprecated personal-repository evaluation tooling stays local.
 /packages/evals/
+
+# Copied from pinned grammar packages by the CLI build.
+/packages/core/assets/tree-sitter/

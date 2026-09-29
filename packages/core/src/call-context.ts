@@ -1,4 +1,4 @@
-import { runPython } from "./python";
+import { runParser } from "./parser";
 import type { Snapshot } from "./filesystem";
 import type { FileEvidence, Range } from "./types";
 type Call = Range & {
@@ -22,7 +22,7 @@ export async function localCallContext(
     return;
   const selected = file.selected.filter((r) => r.sourceByteStart === undefined);
   if (!selected.length) return;
-  const calls = await runPython<Call[]>(
+  const calls = await runParser<Call[]>(
     "calls",
     JSON.stringify({ source: snapshot.source, ranges: selected }),
     signal,

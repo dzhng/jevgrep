@@ -1,6 +1,6 @@
 import { APICallError, experimental_evaluate as evaluate } from "ai";
 import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
-import { providers, type ProviderId } from "./providers";
+import { endpointFor, type CredentialProvider } from "./providers";
 import { type createEvaluationCache, type CacheInput } from "./cache";
 import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
@@ -30,9 +30,11 @@ export class EvaluationFailure extends Error {
 }
 
 export function createEvaluator(options: {
-  provider: ProviderId;
+  provider: CredentialProvider;
   apiKey: string;
   organizationId?: string;
+  baseURL?: string;
+  model?: string;
   cache?: ReturnType<typeof createEvaluationCache>;
   policyVersion?: string;
   fetch?: typeof fetch;
@@ -41,7 +43,7 @@ export function createEvaluator(options: {
   timeoutMs?: number;
   concurrency?: number;
 }) {
-  const preset = providers[options.provider];
+  const endpoint = endpointFor(options);
   const credential =
     options.provider === "kilo" ? createHash("sha256").update(options.apiKey).digest("hex") : "";
   const concurrency = options.concurrency ?? 32;
@@ -83,7 +85,7 @@ export function createEvaluator(options: {
   }
   const provider = createTypeSafeAi({
     apiKey: options.apiKey,
-    baseURL: preset.baseURL,
+    baseURL: endpoint.baseURL,
     ...(options.provider === "kilo" && options.organizationId
       ? { headers: { "X-KiloCode-OrganizationId": options.organizationId } }
       : {}),
@@ -126,9 +128,9 @@ export function createEvaluator(options: {
       const cacheInput: CacheInput = {
         request,
         namespace: {
-          model: preset.model,
+          model: endpoint.model,
           provider: options.provider,
-          endpoint: preset.baseURL,
+          endpoint: endpoint.baseURL,
           ...(options.provider === "kilo"
             ? {
                 organizationId: options.organizationId ?? "",
@@ -137,7 +139,7 @@ export function createEvaluator(options: {
             : {}),
           protocol: "typesafe-ai-3.0.8",
           policyVersion: options.policyVersion ?? "1",
-          parserVersion: "cpython-3.11.3-pyodide-0.25.1-ts-5.9.3",
+          parserVersion: "tree-sitter-0.27.0-python-0.25.0-go-0.25.0-rust-0.24.0-ts-5.9.3",
           promptVersion: "unit-locators-1",
         },
       };
@@ -191,7 +193,7 @@ export function createEvaluator(options: {
           const reservation = rateBudget?.reserve(reservedTokens);
           try {
             const result = await evaluate({
-              model: provider.evaluationModel(preset.model),
+              model: provider.evaluationModel(endpoint.model),
               ...request,
               maxRetries: 0,
               abortSignal: AbortSignal.any([

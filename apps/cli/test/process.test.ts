@@ -44,6 +44,7 @@ testInDocker("interactive auth hides input and exits 130 on interruption", async
       "save",
       "save-kilo",
       "save-kilo-org",
+      "custom-save",
       "interrupt-provider",
       "interrupt-key",
       "cancel-provider",
@@ -74,18 +75,27 @@ try:
                 output += part
     wait_for(b"Choose your Jev provider")
     mode = sys.argv[2]
-    if not mode.endswith("provider"):
-        os.write(master, (b"\\x1b[B" * (4 if mode.startswith("save-kilo") else 2)) + b"\\r")
+    if mode == "custom-save":
+        os.write(master, b"\\x1b[B\\x1b[B\\x1b[B\\x1b[B\\x1b[B\\r")
+        wait_for(b"Base URL")
+        os.write(master, b"http://127.0.0.1:8080/v1\\r")
+        wait_for(b"Model ID")
+        os.write(master, b"gateway/jev-2\\r")
         wait_for(b"API key")
-    if mode.startswith("save"):
         os.write(master, b"pty-fixture-secret\\r")
-        if mode.startswith("save-kilo"):
-            wait_for(b"Organization ID")
-            os.write(master, (b"123e4567-e89b-42d3-a456-426614174000" if mode == "save-kilo-org" else b"") + b"\\r")
-    elif mode.startswith("cancel"):
-        os.write(master, b"\\x03")
     else:
-        process.send_signal(signal.SIGINT)
+        if not mode.endswith("provider"):
+            os.write(master, (b"\\x1b[B" * (4 if mode.startswith("save-kilo") else 2)) + b"\\r")
+            wait_for(b"API key")
+        if mode == "save" or mode.startswith("save-kilo"):
+            os.write(master, b"pty-fixture-secret\\r")
+            if mode.startswith("save-kilo"):
+                wait_for(b"Organization ID")
+                os.write(master, (b"123e4567-e89b-42d3-a456-426614174000" if mode == "save-kilo-org" else b"") + b"\\r")
+        elif mode.startswith("cancel"):
+            os.write(master, b"\\x03")
+        else:
+            process.send_signal(signal.SIGINT)
     rest, errors = process.communicate(timeout=5)
     output += rest
     echo = b""
@@ -108,11 +118,12 @@ finally:
         { env: { ...process.env, HOME: home, XDG_CONFIG_HOME: home } },
       );
       const result = JSON.parse(stdout);
-      expect(result.code).toBe(mode.startsWith("save") ? 0 : 130);
+      const saved = mode === "save" || mode.startsWith("save-kilo") || mode === "custom-save";
+      expect(result.code).toBe(saved ? 0 : 130);
       expect(result.stderr).toBe("");
       expect(result.stdout + result.echo).not.toContain("pty-fixture-secret");
-      expect(result.stdout).toContain(mode.startsWith("save") ? "key saved" : "Interrupted");
-      if (mode.startsWith("save")) {
+      expect(result.stdout).toContain(saved ? "key saved" : "Interrupted");
+      if (mode === "save" || mode.startsWith("save-kilo")) {
         expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
           provider: mode.startsWith("save-kilo") ? "kilo" : "openrouter",
           apiKey: "pty-fixture-secret",
@@ -124,6 +135,14 @@ finally:
           result.stdout.indexOf("TypeSafe"),
         );
         expect(result.stdout.indexOf("TypeSafe")).toBeLessThan(result.stdout.indexOf("OpenRouter"));
+      } else if (mode === "custom-save") {
+        expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+          provider: "custom",
+          baseURL: "http://127.0.0.1:8080/v1",
+          model: "gateway/jev-2",
+          apiKey: "pty-fixture-secret",
+        });
+        expect(result.stdout).toContain("Custom endpoint (127.0.0.1:8080)");
       } else expect(await readFile(file, "utf8")).toBe(previous);
       expect(await readdir(join(home, "jevgrep"))).toEqual(["credentials.json"]);
     }

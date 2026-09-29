@@ -25,7 +25,7 @@ jg skill
 jg "How are telemetry events recorded and sent?" ./my-project
 ```
 
-Requires **Node.js 22+**, **macOS or Linux**, and a key for **Vercel AI Gateway, TypeSafe, OpenRouter, OpenCode Zen, or Kilo Gateway**.
+Requires **Node.js 22+**, **macOS or Linux**, and a key for **Vercel AI Gateway, TypeSafe, OpenRouter, OpenCode Zen, Kilo Gateway, or a custom TypeSafe-compatible endpoint**.
 No separate Python, Bun, or ripgrep installation is required to use `jg`.
 
 Provider selection requires **0.3.0 or newer**. Upgrade an older installation with
@@ -88,7 +88,7 @@ confidently return an excerpt; it does not force every search into a fixed top-t
 list.
 
 The summary and compact file list come first, followed by selected source with
-line references, then detailed declaration and call locations. Python and TypeScript/JavaScript support declaration
+line references, then detailed declaration and call locations. Python, TypeScript/JavaScript, Go and Rust support declaration
 parsing; other text uses a fallback. The output is evidence for the agent to use,
 not a generated answer or a guarantee that every relevant file was found.
 [See a recorded output example](specs/done/jevgrep/assets/stdout-example.txt).
@@ -113,9 +113,15 @@ for per-task costs, artifact identities and limitations. A separate
 [speed study](evals/results/speed-2026-09-28.md) measures the follow-up local
 optimizations with Jev’s native TypeSafe endpoint.
 
-The [latest total-cost rerun](evals/results/total-cost-2026-09-28.md), including
+The [0.4.3 total-cost rerun](evals/results/total-cost-2026-09-28.md), including
 Jev, measured **25.8% lower total cost with the same 8/10 tasks solved**.
 The older ~30% graphic above reports Sol-only cost. Future benchmark totals include Jev.
+
+The [0.5.0 evaluation](evals/results/combined-cost-research-2026-09-28.md) retained
+8/10 solves while reducing native Jev cost by about 59% versus that 0.4.3 run.
+Combined Sol-plus-Jev cost was 2–3% higher, accepted as a small tradeoff for this
+release. These single-run observations do not establish statistical equivalence
+or a speed improvement.
 
 ## Source, credentials, and local state
 
@@ -123,6 +129,11 @@ Searches send eligible source content to Jev through the provider selected durin
 filesystem filtering respects ignore files and excludes hidden, dependency/build,
 binary, and obvious credential files. These filters are not a guarantee that all
 sensitive information has been removed; choose a search root you intend to send.
+`jg files [root]` counts the files a search under that root may read, grouped by
+top-level directory, with no provider key or network request. It takes the same
+filtering flags as search.
+To skip paths inside that root for one search, pass `--exclude` with a gitignore pattern
+relative to the root, for example `--exclude '**/*.test.ts' --exclude 'src/generated/'`.
 
 `jg auth` asks for your provider, then saves its key in an owner-only config file.
 Re-running auth replaces that setup; searches always use the saved provider.

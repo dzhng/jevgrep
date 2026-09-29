@@ -34,3 +34,12 @@ The [final product research report](results/relevance-threshold-2026-09-27.md) r
 The [speed study](results/speed-2026-09-28.md) compares the frozen local optimizations and native TypeSafe route against that previous cohort and the same saved no-Jev baselines.
 
 The [total-cost rerun](results/total-cost-2026-09-28.md) uses published 0.4.3 and includes Jev costs, the default for all future runs. Historical reports retain their original accounting basis.
+
+The [combined-cost research](results/combined-cost-research-2026-09-28.md) examines
+why lower retrieval charges can be offset by greater coding-agent expense.
+
+The [skill-impact pilot](results/skill-impact-2026-09-29.md) compares old and new
+skills on identical CLI builds, separately from automatic-trigger checks.
+
+The [Python parser checkpoint](results/python-parser-checkpoint-2026-09-29.md)
+records one official task against the merged Tree-sitter runtime.

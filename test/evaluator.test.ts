@@ -1,5 +1,9 @@
 import { routeProviderFetch } from "./fixtures/provider-route.mjs";
 import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createEvaluationCache } from "../packages/core/src/cache";
 import { createEvaluator, EvaluationFailure } from "../packages/core/src/evaluator";
 import { createEvaluationCache } from "../packages/core/src/cache";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -497,6 +501,121 @@ for (const kind of ["cancelled", "authentication"] as const)
       server.stop(true);
     }
   });
+
+test("a custom provider uses its saved base URL and model through the same protocol", async () => {
+  const observed: Array<{ path: string; authorization: string; body: Record<string, unknown> }> =
+    [];
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      observed.push({
+        path: new URL(request.url).pathname,
+        authorization: request.headers.get("authorization") ?? "",
+        body: (await request.json()) as Record<string, unknown>,
+      });
+      return Response.json({ answers: { q: { type: "noul", noul: 0.7 } } });
+    },
+  });
+  try {
+    const evaluator = createEvaluator({
+      apiKey: "fixture-key",
+      provider: "custom",
+      baseURL: `http://127.0.0.1:${server.port}/gateway/v1`,
+      model: "gateway/jev-2",
+      signal: new AbortController().signal,
+    });
+    expect(
+      await evaluator.evaluate({
+        state: "test",
+        questions: { q: { type: "boolean", instructions: "Relevant?" } },
+      }),
+    ).toEqual({ q: 0.7 });
+    expect(observed).toEqual([
+      {
+        path: "/gateway/v1/systemone",
+        authorization: "Bearer fixture-key",
+        body: {
+          model: "gateway/jev-2",
+          state: "test",
+          questions: { q: { type: "noul", instructions: "Relevant?" } },
+        },
+      },
+    ]);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("custom cache identity keeps endpoints and models separate from presets", async () => {
+  const models: string[] = [];
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const body = (await request.json()) as { model: string };
+      models.push(body.model);
+      return Response.json({ answers: { q: { type: "noul", noul: 0.6 } } });
+    },
+  });
+  const directory = await mkdtemp(join(tmpdir(), "jevgrep-custom-cache-"));
+  try {
+    const request = {
+      state: "test",
+      questions: { q: { type: "boolean" as const, instructions: "Relevant?" } },
+    };
+    const signal = new AbortController().signal;
+    const origin = `http://127.0.0.1:${server.port}`;
+    const evaluator = (options: Record<string, unknown>) =>
+      createEvaluator({
+        apiKey: "fixture-key",
+        signal,
+        cache: createEvaluationCache({ directory }),
+        ...options,
+      } as Parameters<typeof createEvaluator>[0]);
+
+    expect(
+      await evaluator({
+        provider: "vercel",
+        fetch: routeProviderFetch(fetch, origin),
+      }).evaluate(request),
+    ).toEqual({ q: 0.6 });
+    expect(
+      await evaluator({
+        provider: "custom",
+        baseURL: `${origin}/gateway/v1`,
+        model: "gateway/jev-2",
+      }).evaluate(request),
+    ).toEqual({ q: 0.6 });
+    expect(models).toEqual(["typesafe-ai/jev", "gateway/jev-2"]);
+
+    expect(
+      await evaluator({
+        provider: "custom",
+        baseURL: `${origin}/gateway/v1`,
+        model: "gateway/jev-2",
+      }).evaluate(request),
+    ).toEqual({ q: 0.6 });
+    expect(models).toEqual(["typesafe-ai/jev", "gateway/jev-2"]);
+
+    expect(
+      await evaluator({
+        provider: "custom",
+        baseURL: `${origin}/gateway/v1`,
+        model: "gateway/jev-3",
+      }).evaluate(request),
+    ).toEqual({ q: 0.6 });
+    expect(
+      await evaluator({
+        provider: "custom",
+        baseURL: `${origin}/other/v1`,
+        model: "gateway/jev-2",
+      }).evaluate(request),
+    ).toEqual({ q: 0.6 });
+    expect(models).toEqual(["typesafe-ai/jev", "gateway/jev-2", "gateway/jev-3", "gateway/jev-2"]);
+  } finally {
+    server.stop(true);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("native token pacing preserves concurrent small calls and excludes queue time from timeout", async () => {
   const arrivals: Array<{ at: number; tokens: number }> = [];
