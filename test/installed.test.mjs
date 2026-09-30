@@ -364,7 +364,7 @@ function assertCachedRequestsAreReused(requests, before) {
   for (const { raw, body } of requests.slice(before)) {
     assert.ok(!seen.has(raw), "An identical successful native request bypassed the cache");
     seen.add(raw);
-    // Completion order affects request context, so warm reads can produce different cache keys.
+    // Tolerate reordered evidence: this checks cache reuse, not request order.
     assert.ok(Array.isArray(body.state.selectedEvidence));
     const evidenceContents = (value) =>
       JSON.stringify(value.state.selectedEvidence.map((item) => JSON.stringify(item)).sort());

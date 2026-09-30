@@ -49,7 +49,13 @@ source bytes; never reconstruct returned code from the tree.
 
 Tree-sitter recognizes syntax rather than validating CPython semantics. Trees
 with syntax errors use text fallback. Bare-CR Python also uses text fallback
-because retrieval coordinates count LF lines. Repository source is never executed.
+because retrieval coordinates count LF lines. So does generated source nested
+beyond what a parser handles: TypeScript that exhausts the call stack, and Python
+nested more than 50,000 levels, near where Tree-sitter queries stop matching and
+slow down sharply. Long runs of whole-line Python comments are parsed as blank
+lines of the same length, because the grammar's scanner is quadratic in a run's
+length; a run that may belong to a string is parsed as written.
+Repository source is never executed.
 See [parser contracts](../test/parser/README.md) and
 [measurement evidence](../specs/tree-sitter/RESULTS.md).
 
@@ -77,9 +83,10 @@ source text is a field inside those objects. Provider selection changes transpor
 and authentication, not retrieval semantics. Bounded retries, cancellation and
 freshness checks apply before source is uploaded or returned.
 
-Ignore rules are reused within a search only while fresh filesystem identity and
-canonical-path checks still match. Edits, replacement and deletion invalidate
-that reuse. Source snapshots retain their existing read and freshness checks.
+Ignore rules and source snapshots are reused within a search only while fresh
+eligibility and filesystem identity checks still match. Edits, replacement and
+deletion invalidate that reuse. A file changed within a few seconds of its read is
+always read again, because coarse timestamps cannot separate two writes in one tick.
 
 ## Version improvement
 

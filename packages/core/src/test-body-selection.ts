@@ -37,7 +37,7 @@ export async function selectTestBodies(
     for (const unit of syntax.units) {
       if (
         unit.partial ||
-        unit.name.endsWith(".context") ||
+        unit.classContext ||
         !file.selected.some((r) => r.sourceByteStart === undefined && contains(r, unit.range)) ||
         !shown.some((e) => contains(e.range, unit.range))
       )

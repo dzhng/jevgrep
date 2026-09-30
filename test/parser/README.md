@@ -2,6 +2,8 @@
 
 Tests cover original source coordinates, Unicode boundaries, declaration owners,
 syntax fallback and cancellation through the production inspection API. Unsupported languages retain lossless text fallback.
+Generated source nested too deeply for a parser also falls back to text, promptly
+and without affecting other files; wide files with many statements still parse.
 
 Python helpers in `reference/` are frozen test-only oracles from the replaced
 runtime. Differential fixtures compare declaration, preview, neighbourhood and

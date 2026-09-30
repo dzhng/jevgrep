@@ -10,6 +10,7 @@ import {
   chmod,
   mkdir,
   symlink,
+  utimes,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -166,23 +167,63 @@ test("concurrent writers publish complete answers and clear permits later fresh 
   expect(await caches[1]!.get(input)).toBeUndefined();
 });
 
-test("byte bounds retain valid entries and oversized answers bypass persistence visibly", async () => {
+test("byte bounds count allocated blocks, evict the oldest answers and reject oversized ones", async () => {
+  let clock = Date.now();
+  const budget = 3 * 4096 + 100;
   const dir = await directory();
-  const cache = createEvaluationCache({ directory: dir, maxBytes: 180 });
-  for (let index = 0; index < 8; index++)
+  const cache = createEvaluationCache({ directory: dir, maxBytes: budget, now: () => clock });
+  for (let index = 0; index < 8; index++) {
+    clock += 1000;
     await cache.put({ ...input, request: { index } }, { question1: index / 8 });
+  }
   const names = await readdir(join(dir, "entries"));
-  let bytes = 0;
+  let allocatedBytes = 0;
   for (const name of names) {
     const file = join(dir, "entries", name);
-    bytes += (await stat(file)).size;
+    const info = await stat(file);
+    allocatedBytes += Math.max(Math.ceil(info.size / 4096) * 4096, info.blocks * 512);
     expect(JSON.parse(await readFile(file, "utf8")).answers.question1).toBeGreaterThanOrEqual(0);
   }
-  expect(bytes).toBeLessThanOrEqual(180);
-  expect(bytes).toBeGreaterThan(0);
-  await cache.put(input, { ["large".repeat(100)]: 1 });
+  expect(allocatedBytes).toBeLessThanOrEqual(budget);
+  expect(names.length).toBeGreaterThan(0);
+  expect(await cache.get({ ...input, request: { index: 7 } })).toEqual({ question1: 7 / 8 });
+  expect(await cache.get({ ...input, request: { index: 0 } })).toBeUndefined();
+  await cache.put(input, { ["large".repeat(3000)]: 1 });
   expect(await cache.get(input)).toBeUndefined();
   expect(cache.stats().issues).toEqual([{ kind: "cache_limit", count: 1 }]);
+});
+
+test("sweeps run at most hourly across processes and remove expired and abandoned files", async () => {
+  const minute = 60 * 1000;
+  const start = Date.now();
+  let clock = start;
+  const dir = await directory();
+  const entries = join(dir, "entries");
+  const options = { directory: dir, ttlMs: 45 * minute, now: () => clock };
+  const writer = createEvaluationCache(options);
+  await writer.put({ ...input, request: { index: 0 } }, { question1: 0 });
+  const [expired] = await readdir(entries);
+  clock = start + 50 * minute;
+  const abandoned = ".pending-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  const hoursAgo = (clock - 120 * minute) / 1000;
+  await writeFile(join(entries, abandoned), "partial");
+  await utimes(join(entries, abandoned), hoursAgo, hoursAgo);
+  for (let index = 1; index <= 3; index++)
+    await writer.put({ ...input, request: { index } }, { question1: index });
+  // Neither later writes nor another process within the hour rescan the directory.
+  const early = createEvaluationCache(options);
+  await early.put({ ...input, request: { index: 4 } }, { question1: 4 });
+  expect(await readdir(entries)).toEqual(expect.arrayContaining([expired, abandoned]));
+  expect(await writer.get({ ...input, request: { index: 0 } })).toBeUndefined();
+  clock = start + 70 * minute;
+  const late = createEvaluationCache(options);
+  await late.put({ ...input, request: { index: 5 } }, { question1: 5 });
+  const remaining = await readdir(entries);
+  expect(remaining).toHaveLength(5);
+  expect(remaining).not.toContain(expired);
+  expect(remaining).not.toContain(abandoned);
+  expect(await late.get({ ...input, request: { index: 1 } })).toEqual({ question1: 1 });
+  expect([writer, early, late].flatMap((cache) => cache.stats().issues)).toEqual([]);
 });
 
 test("clear removes an abandoned detached generation even when no active entries remain", async () => {

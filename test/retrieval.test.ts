@@ -1,7 +1,7 @@
 import { renderResult } from "../apps/cli/src/render";
 import { routeProviderFetch } from "./fixtures/provider-route.mjs";
-import { expect } from "bun:test";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { expect, spyOn } from "bun:test";
+import { mkdtemp, mkdir, open, writeFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testIfDocker } from "./helpers/docker";
@@ -534,6 +534,263 @@ testIfDocker(
       expect(result.files).toHaveLength(3);
       expect(result.files.every((file) => file.selected.length > 0)).toBe(true);
       expect(result.issues).toContainEqual({ kind: "authentication", count: 1 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+testIfDocker(
+  "unparseable generated files do not fail the search or other files' parsing",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-unparseable-"));
+    try {
+      await mkdir(join(root, "src"), { recursive: true });
+      await writeFile(
+        join(root, "src/nested.ts"),
+        "export const x = " + "(".repeat(20_000) + "1" + ")".repeat(20_000) + ";\n",
+      );
+      await writeFile(join(root, "src/generated.py"), "value = " + "1+".repeat(100_000) + "1\n");
+      await writeFile(
+        join(root, "src/events.py"),
+        "class Events:\n    def record(self, name):\n        return name\n",
+      );
+      await writeFile(
+        join(root, "src/events.ts"),
+        "export class Events {\n  record(name: string) {\n    return name;\n  }\n}\n",
+      );
+      const result = await retrieve(
+        { root, query: "event recording", signal: new AbortController().signal },
+        {
+          requests: 0,
+          async evaluate(request) {
+            return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9]));
+          },
+        },
+      );
+      expect(result.status).toBe("complete");
+      const leads = (path: string) =>
+        result.files.find((file) => file.path === path)?.leads.map((lead) => lead.name);
+      // Healthy files keep declaration parsing; unparseable ones fall back to text.
+      expect(leads("src/events.py")).toContain("Events.record");
+      expect(leads("src/events.ts")).toContain("Events.record");
+      for (const path of ["src/nested.ts", "src/generated.py"])
+        expect(result.files.find((file) => file.path === path)?.excerpts.length).toBeGreaterThan(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+testIfDocker(
+  "retrieval reads an unchanged file once and still invalidates an edited candidate",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-reuse-"));
+    const realNow = Date.now;
+    // Fixture files must look older than the reader's recent-change guard.
+    const clock = spyOn(Date, "now").mockImplementation(() => realNow() + 10_000);
+    const source =
+      "// REUSE_SENTINEL\n" +
+      Array.from({ length: 20 }, (_, i) => `export function event${i}() {return ${i};}\n`).join("");
+    const events = join(root, "events.ts");
+    let reads = 0;
+    let restoreRead = () => {};
+    try {
+      await writeFile(events, source);
+      await writeFile(join(root, "other.ts"), "export function otherEvent() {return true;}\n");
+      // Two writes can share a coarse clock tick; pin the first mtime so the edit is observable.
+      await utimes(events, 0, 0);
+      const probe = await open(events);
+      const prototype = Object.getPrototypeOf(probe);
+      const originalRead = prototype.read;
+      await probe.close();
+      const spy = spyOn(prototype, "read").mockImplementation(async function (
+        this: unknown,
+        ...args: unknown[]
+      ) {
+        const result = await originalRead.apply(this, args);
+        if (result.buffer.subarray(0, result.bytesRead).toString().includes("REUSE_SENTINEL"))
+          reads++;
+        return result;
+      });
+      restoreRead = () => spy.mockRestore();
+      const search = (edit: boolean) => {
+        let edited = false;
+        return retrieve(
+          { root, query: "event behavior", signal: new AbortController().signal },
+          {
+            requests: 0,
+            async evaluate(request, policy) {
+              await policy?.beforeAttempt?.();
+              const state = request.state as { declarations?: unknown[]; path?: string };
+              if (edit && !edited && state.declarations && state.path === "events.ts") {
+                edited = true;
+                await writeFile(events, source.replace("return 0;", "return 9;"));
+              }
+              return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9]));
+            },
+          },
+        );
+      };
+      const healthy = await search(false);
+      expect(healthy.status).toBe("complete");
+      expect(healthy.files.find((file) => file.path === "events.ts")?.excerpts.length).toBe(1);
+      // Discovery, both selection passes, every freshness check and final output share one read.
+      expect(reads).toBe(1);
+      const changed = await search(true);
+      expect(changed.status).toBe("incomplete");
+      expect(changed.issues).toContainEqual({ kind: "changed", count: expect.any(Number) });
+      expect(changed.files.find((file) => file.path === "events.ts")).toMatchObject({
+        excerpts: [],
+        sourceOmitted: true,
+      });
+    } finally {
+      restoreRead();
+      clock.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+testIfDocker(
+  "cross-file evidence order does not depend on which file finishes selection first",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-donor-order-"));
+    try {
+      // Twenty declarations need three groups; one declaration needs one.
+      await writeFile(
+        join(root, "many.ts"),
+        Array.from({ length: 20 }, (_, i) => `export function many${i}() {return ${i};}\n`).join(
+          "",
+        ),
+      );
+      await writeFile(join(root, "few.ts"), "export function few() {return 0;}\n");
+      const donorOrders = async (slow: string) => {
+        const orders: string[][] = [];
+        await retrieve(
+          { root, query: "event behavior", signal: new AbortController().signal },
+          {
+            requests: 0,
+            async evaluate(request, policy) {
+              await policy?.beforeAttempt?.();
+              const state = request.state as {
+                path?: string;
+                declarations?: unknown[];
+                selectedEvidence?: Array<{ path: string }>;
+              };
+              // Delay one file's first pass so it finishes selection after the other.
+              if (state.declarations && !state.selectedEvidence && state.path === slow)
+                await new Promise((resolve) => setTimeout(resolve, 50));
+              if (state.selectedEvidence)
+                orders.push([...new Set(state.selectedEvidence.map((entry) => entry.path))]);
+              return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9]));
+            },
+          },
+        );
+        return orders;
+      };
+      for (const slow of ["few.ts", "many.ts"]) {
+        const orders = await donorOrders(slow);
+        expect(orders.length).toBeGreaterThan(0);
+        // Fewer declaration groups first, as sequential selection used to finish them.
+        for (const order of orders) expect(order).toEqual(["few.ts", "many.ts"]);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+for (const [layout, source, expected] of [
+  ["class header", "export class Widget {\n  context() { return 1; }\n}\n", 1],
+  ["member named context only", "export class Widget { context() { return 1; } }\n", 0],
+] as const)
+  testIfDocker(`relationship anchoring follows class structure: ${layout}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-anchor-"));
+    let relationships = 0;
+    try {
+      await mkdir(join(root, "pkg/sub"), { recursive: true });
+      await writeFile(join(root, "widget.ts"), source);
+      await writeFile(
+        join(root, "pkg/sub/child.ts"),
+        "export class Child extends Widget { context() { return 2; } }\n",
+      );
+      await retrieve(
+        { root, query: "widget context", signal: new AbortController().signal },
+        {
+          requests: 0,
+          async evaluate(request) {
+            const state = request.state as {
+              relationAnchor?: unknown;
+              items?: Array<{ kind: string }>;
+            };
+            if (state.relationAnchor) relationships++;
+            return Object.fromEntries(
+              Object.keys(request.questions).map((id, index) => [
+                id,
+                state.items ? (state.items[index]?.kind === "file" ? 0.9 : 0.1) : 0.9,
+              ]),
+            );
+          },
+        },
+      );
+      expect(relationships).toBe(expected);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+testIfDocker(
+  "a large declaration index keeps its longest prefix that fits the preview",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-declaration-index-"));
+    try {
+      const count = 3000;
+      await writeFile(
+        join(root, "client.ts"),
+        Array.from(
+          { length: count },
+          (_, i) => `export function op${i}(a: number) { return a + ${i}; }\n`,
+        ).join(""),
+      );
+      const previews: Array<{ declarations?: unknown[]; declarationIndexTruncated?: boolean }> = [];
+      await retrieve(
+        { root, query: "op behavior", signal: new AbortController().signal },
+        {
+          requests: 0,
+          async evaluate(request) {
+            const state = request.state as {
+              items?: Array<{ filePreview?: (typeof previews)[number] }>;
+            };
+            for (const item of state.items ?? [])
+              if (item.filePreview) previews.push(item.filePreview);
+            return Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.1]));
+          },
+        },
+      );
+      const preview = previews[0]!;
+      const kept = preview.declarations!.length;
+      expect(preview.declarationIndexTruncated).toBe(true);
+      expect(kept).toBeGreaterThan(0);
+      expect(kept).toBeLessThan(count);
+      expect(preview.declarations).toEqual(
+        Array.from({ length: kept }, (_, i) => ({
+          name: `op${i}`,
+          startLine: i + 1,
+          endLine: i + 1,
+        })),
+      );
+      // The index keeps the longest prefix: one more declaration would not fit.
+      expect(Buffer.byteLength(JSON.stringify(preview))).toBeLessThanOrEqual(32000);
+      const longer = {
+        ...preview,
+        declarations: [
+          ...preview.declarations!,
+          { name: `op${kept}`, startLine: kept + 1, endLine: kept + 1 },
+        ],
+      };
+      expect(Buffer.byteLength(JSON.stringify(longer))).toBeGreaterThan(32000);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

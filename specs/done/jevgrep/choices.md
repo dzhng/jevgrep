@@ -7,8 +7,9 @@ The [implementation record](README.md) owns the closure decision and the
 [corrected confirmation](assets/freshness-confirmation.md) owns measured outcomes.
 
 Review these medium-confidence choices first: the benchmark work clock, ordering
-inside cross-file evidence, and the shared Python interpreter. They preserve the
-intended behavior but create boundaries that future changes must respect.
+inside cross-file evidence, the shared Python interpreter and identity-based
+snapshot reuse. They preserve the intended behavior but create boundaries that
+future changes must respect.
 
 ## Sound — medium confidence
 
@@ -47,13 +48,26 @@ comparison. Owner: [installed runner](../../../evals/implementation/swebench/ins
 
 ### Preserve order inside requests while comparing independent requests fairly
 
-**When:** reference harness and source-selection integration.
+**When:** reference harness and source-selection integration; donor order revised
+after measuring warm searches.
 
-Files A and B both produce selected source. If B finishes first, its source enters
-the next cross-file request first. A cached answer can change which file finishes
-first, so it can legitimately produce a differently ordered later request. Sorting
-that source by filename would introduce a different input to Jev, the relevance
-classifier, even if every source byte were retained.
+Files A and B both produce selected source, and both enter the next cross-file
+request. Files are selected concurrently and used to enter in completion order.
+Most files need a single declaration group, so that order depended on provider
+timing: with jittered provider latency, warm searches resent 26 to 36 follow-up
+requests in half to all of the runs. Donors are now ordered explicitly: fewer
+declaration groups first, as sequential selection would finish them, then path.
+A warm search with unchanged selections therefore rebuilds the same follow-up
+requests. Sorting by filename alone would give Jev, the relevance classifier, a
+different input from the measured strategy, even if every source byte were retained.
+
+Navigation has the same property one level up. A directory level can span several
+concurrent navigation requests, and its decisions determine the next level's
+items, pruned directories and relationship seeds, which are then regrouped into
+new requests. Decisions are therefore used in item order, not in the order their
+requests completed. With in-order responses this matches the earlier behavior;
+in a probe with 240 directories, five completion orders previously produced four
+different sets of later navigation requests and now produce one.
 
 The reference fixture controls which source is selected so its comparison is
 stable. It may sort independent whole HTTP requests before comparing them, but
@@ -67,9 +81,10 @@ preserve every request's internal array and question order
 
 **Gap:** the spec did not prescribe how to control concurrent reference calls in a
 fixture. **Reach:** fixture equality is not a promise of identical arrival or
-completion order in a live repository. Production retains completion order for
-cross-file evidence. **Verdict:** sound because it avoids hiding a semantic input
-change. **Confidence:** medium. Owners: [retrieval](../../../packages/core/src/retrieve.ts)
+completion order in a live repository. Where sequential selection would have
+finished files out of group-count order, such as ties or slow parsing, production
+requests differ from that order but stay repeatable. **Verdict:** sound because it
+avoids hiding a semantic input change. **Confidence:** medium. Owners: [retrieval](../../../packages/core/src/retrieve.ts)
 and [reference tests](https://github.com/dzhng/jevgrep/blob/80a216bfa0bf04b2ec615ede81f7af32f1c14153/test/reference/).
 
 ### Use one child process for the bundled Python interpreter
@@ -142,23 +157,53 @@ search or optimal treatment of minified source. A change to question grouping is
 a separate retrieval-policy experiment. **Verdict:** sound under the preservation
 constraint. **Confidence:** medium. Owner: [selection](../../../packages/core/src/selection.ts).
 
-### Enforce the cache bound by scanning stored entries
+### Enforce the cache bound with periodic oldest-first sweeps
 
-**When:** cache integration and performance review.
+**When:** cache integration; revised after measuring per-write scans.
 
 A new answer is ready to save while the cache is near its disk limit. The cache
-publishes the complete answer atomically, then scans stored entries in filesystem
-enumeration order and removes entries beyond the retained byte budget. This is
-not oldest-first eviction. It does not maintain a separate persistent index or run a
-background cleanup service. With many entries, repeating that scan for many new
-answers adds overhead; an indexed eviction design would trade that work for
-another stateful component to maintain.
+publishes the complete answer atomically and sets its modification time to the
+answer's creation time; that write does not scan the directory. A sweep runs on a
+process's first write when the shared `maintained` stamp is missing, in the future
+or more than an hour old, and again when that process's own writes push its
+estimate past the budget. The sweep reads metadata only. It removes expired entries
+and abandoned publications, then removes the oldest answers until allocated blocks
+fall to seven eighths of the budget. Tiny answers are charged whole filesystem
+blocks, so the bound tracks disk use rather than payload bytes. There is still no
+index or background service.
 
-**Gap:** the cache size bound was fixed but its maintenance mechanism was open.
-**Reach:** storage is best effort, and large-cache write throughput is limited by
-repeated scans. This mechanism makes no throughput claim. **Verdict:** sound as a
-simple bounded-storage owner with a disclosed cost. **Confidence:** medium.
+**Gap:** the cache size bound was fixed but its maintenance mechanism was open. The
+first design rescanned every entry after each write, and at 40,000 entries each
+write took about a second while holding a request slot. **Reach:** storage remains
+best effort. Other processes' writes can exceed the budget until the next sweep,
+and the write that triggers a sweep pays for one metadata pass. **Verdict:** sound
+as a bounded-storage owner without per-write scans. **Confidence:** medium.
 Owner: [cache](../../../packages/core/src/cache.ts).
+
+### Reuse a snapshot while its file identity is unchanged
+
+**When:** performance review after overlapping declaration groups.
+
+Retrieval checks the same files many times: before each declaration group, before
+each provider attempt and for every cross-file donor. Each check used to reread
+and rehash the whole file; a 58-file search performed 491 full reads, and the
+serialized validation queue delayed requests behind them. The reader now keeps
+its earlier snapshot while the file's identity matches: device, inode, size and
+both modification and change times, confirmed by opening the file without
+reading it. Eligibility is still evaluated on every check, so ignore edits and
+exclusions apply immediately. A file whose last change is less than three seconds
+older than its read is never reused, because a second write in the same coarse
+timestamp tick could leave its identity unchanged. Retained source is bounded to
+32 MiB, least recently used first.
+
+**Gap:** freshness requires detecting changes between validations, not a specific
+detection mechanism. **Reach:** identity cannot see a write that leaves size and
+both timestamps unchanged, such as a delayed timestamp update through a shared
+memory map, a backward clock step, or a network server whose clock lags the client
+by more than the guard. Callers that omit `reuse` still reread every time.
+**Verdict:** sound for ordinary edits, saves, replacements and deletions.
+**Confidence:** medium. Owners: [reader](../../../packages/core/src/filesystem.ts)
+and [retrieval](../../../packages/core/src/retrieve.ts).
 
 ## Sound — high confidence
 
@@ -171,10 +216,11 @@ A request is queued with source from A and B. While it waits, the user edits A o
 adds an ignore rule excluding it. The request retains A's original content hash,
 a fingerprint of the bytes it used, outside the data sent to Jev. Before evaluating
 the buffered request, and before each provider attempt after any waiting, the
-same reader checks eligibility and compares current bytes with that hash. A
-changed source cannot knowingly be submitted again. If a navigation group has
-both invalid and healthy members, finite splitting lets the healthy siblings
-continue instead of discarding the entire group.
+same reader checks eligibility and confirms that the current snapshot still has
+that hash. A file whose identity shows no change keeps its earlier snapshot; any
+other file is reread. A changed source cannot knowingly be submitted again. If a
+navigation group has both invalid and healthy members, finite splitting lets the
+healthy siblings continue instead of discarding the entire group.
 
 The same rule applies when one file supplies context for another. Each distinct
 source donor is checked; stale excerpts are removed and the result becomes

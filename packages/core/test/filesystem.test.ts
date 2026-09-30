@@ -1,6 +1,16 @@
 import { testIfDocker as test } from "../../../test/helpers/docker";
 import { afterEach, expect, spyOn } from "bun:test";
-import { mkdtemp, mkdir, writeFile, rm, symlink, chmod, open, utimes } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  writeFile,
+  rm,
+  symlink,
+  chmod,
+  open,
+  rename,
+  utimes,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFilesystem } from "../src/filesystem";
@@ -459,5 +469,160 @@ test("valid UTF-8 control-byte binary and invalid UTF-8 remain excluded under ev
     });
   } finally {
     await reader.close();
+  }
+});
+
+/** Counts OS reads whose returned bytes contain each sentinel: one per full read of that file. */
+async function sourceReads(file: string, sentinels: string[]) {
+  const probe = await open(file);
+  const prototype = Object.getPrototypeOf(probe);
+  const originalRead = prototype.read;
+  await probe.close();
+  const counts = new Map(sentinels.map((sentinel) => [sentinel, 0]));
+  const spy = spyOn(prototype, "read").mockImplementation(async function (
+    this: unknown,
+    ...args: unknown[]
+  ) {
+    const result = await originalRead.apply(this, args);
+    const text = result.buffer.subarray(0, result.bytesRead).toString("utf8");
+    for (const sentinel of sentinels)
+      if (text.includes(sentinel)) counts.set(sentinel, counts.get(sentinel)! + 1);
+    return result;
+  });
+  return { count: (sentinel: string) => counts.get(sentinel)!, restore: () => spy.mockRestore() };
+}
+// The reader's clock runs ahead, so freshly written fixtures fall outside the recent-change guard.
+const ahead = () => Date.now() + 10_000;
+
+test("identity-checked reuse returns the earlier snapshot until the file changes", async () => {
+  const root = await fixture({ "source.ts": "export const REUSE = 1;\n" });
+  // Two writes can share a coarse clock tick; pin the first mtime so the later edit is observable.
+  await utimes(join(root, "source.ts"), 0, 0);
+  const reads = await sourceReads(join(root, "source.ts"), ["REUSE"]);
+  const reader = await createFilesystem({ root, now: ahead });
+  try {
+    const first = await reader.readSnapshot("source.ts", { reuse: true });
+    const second = await reader.readSnapshot("./source.ts", { reuse: true });
+    if (first.status !== "ok" || second.status !== "ok") throw new Error("Expected snapshots");
+    expect(second.snapshot).toBe(first.snapshot);
+    expect(reads.count("REUSE")).toBe(1);
+    // Without reuse the reader always rereads, and a reread refreshes the retained snapshot.
+    const plain = await reader.readSnapshot("source.ts");
+    expect(plain).toMatchObject({
+      status: "ok",
+      snapshot: { source: "export const REUSE = 1;\n" },
+    });
+    expect(reads.count("REUSE")).toBe(2);
+    await writeFile(join(root, "source.ts"), "export const REUSE = 2;\n");
+    const edited = await reader.readSnapshot("source.ts", { reuse: true });
+    expect(edited).toMatchObject({
+      status: "ok",
+      snapshot: { source: "export const REUSE = 2;\n" },
+    });
+    expect(reads.count("REUSE")).toBe(3);
+    await reader.readSnapshot("source.ts", { reuse: true });
+    expect(reads.count("REUSE")).toBe(3);
+  } finally {
+    reads.restore();
+    await reader.close();
+  }
+});
+
+test("a file changed shortly before its read is always read again", async () => {
+  const root = await fixture({ "recent.ts": "export const RECENT = 1;\n" });
+  const reads = await sourceReads(join(root, "recent.ts"), ["RECENT"]);
+  const reader = await createFilesystem({ root });
+  try {
+    const first = await reader.readSnapshot("recent.ts", { reuse: true });
+    const second = await reader.readSnapshot("recent.ts", { reuse: true });
+    if (first.status !== "ok" || second.status !== "ok") throw new Error("Expected snapshots");
+    expect(second.snapshot).not.toBe(first.snapshot);
+    expect(second.snapshot.contentHash).toBe(first.snapshot.contentHash);
+    expect(reads.count("RECENT")).toBe(2);
+  } finally {
+    reads.restore();
+    await reader.close();
+  }
+});
+
+test("reuse still applies current eligibility and notices replacement", async () => {
+  const root = await fixture({ "kept.ts": "export const KEPT = 1;\n" });
+  const reads = await sourceReads(join(root, "kept.ts"), ["KEPT"]);
+  const reader = await createFilesystem({ root, now: ahead });
+  try {
+    expect(await reader.readSnapshot("kept.ts", { reuse: true })).toMatchObject({ status: "ok" });
+    await writeFile(join(root, ".ignore"), "kept.ts\n");
+    expect(await reader.readSnapshot("kept.ts", { reuse: true })).toMatchObject({
+      status: "excluded",
+      reason: "ignored",
+    });
+    await rm(join(root, ".ignore"));
+    // Exclusion discards the retained snapshot, so the next read goes back to the file.
+    expect(await reader.readSnapshot("kept.ts", { reuse: true })).toMatchObject({ status: "ok" });
+    expect(reads.count("KEPT")).toBe(2);
+    // An atomic replacement with identical bytes is a new file and is read again.
+    await writeFile(join(root, "replacement"), "export const KEPT = 1;\n");
+    await rename(join(root, "replacement"), join(root, "kept.ts"));
+    expect(await reader.readSnapshot("kept.ts", { reuse: true })).toMatchObject({
+      status: "ok",
+      snapshot: { source: "export const KEPT = 1;\n" },
+    });
+    expect(reads.count("KEPT")).toBe(3);
+    await rm(join(root, "kept.ts"));
+    expect(await reader.readSnapshot("kept.ts", { reuse: true })).toMatchObject({
+      status: "issue",
+      issue: { kind: "changed" },
+    });
+  } finally {
+    reads.restore();
+    await reader.close();
+  }
+});
+
+test("retained snapshots are bounded by source bytes, least recently used first", async () => {
+  const root = await fixture({
+    "a.ts": "export const EVICT_A = 1;\n",
+    "b.ts": "export const EVICT_B = 1;\n",
+  });
+  const reads = await sourceReads(join(root, "a.ts"), ["EVICT_A", "EVICT_B"]);
+  const reader = await createFilesystem({ root, now: ahead, limits: { maxReusableBytes: 40 } });
+  try {
+    await reader.readSnapshot("a.ts", { reuse: true });
+    await reader.readSnapshot("a.ts", { reuse: true });
+    expect(reads.count("EVICT_A")).toBe(1);
+    // Retaining b exceeds the bound and evicts a.
+    await reader.readSnapshot("b.ts", { reuse: true });
+    await reader.readSnapshot("b.ts", { reuse: true });
+    await reader.readSnapshot("a.ts", { reuse: true });
+    expect(reads.count("EVICT_A")).toBe(2);
+    expect(reads.count("EVICT_B")).toBe(1);
+    await reader.readSnapshot("b.ts", { reuse: true });
+    expect(reads.count("EVICT_B")).toBe(2);
+  } finally {
+    reads.restore();
+    await reader.close();
+  }
+});
+
+test("exclude patterns apply to retained snapshots of every reader", async () => {
+  const root = await fixture({ "src/kept.ts": "export const KEPT = 1;\n" });
+  const reuse = { reuse: true };
+  const open = await createFilesystem({ root, now: ahead });
+  const narrowed = await createFilesystem({
+    root,
+    now: ahead,
+    policy: { exclude: ["src/kept.ts"] },
+  });
+  try {
+    expect(await open.readSnapshot("src/kept.ts", reuse)).toMatchObject({ status: "ok" });
+    expect(await open.readSnapshot("src/kept.ts", reuse)).toMatchObject({ status: "ok" });
+    // Retention belongs to one reader; another reader's policy still decides eligibility.
+    expect(await narrowed.readSnapshot("src/kept.ts", reuse)).toMatchObject({
+      status: "excluded",
+      reason: "exclude_pattern",
+    });
+  } finally {
+    await open.close();
+    await narrowed.close();
   }
 });

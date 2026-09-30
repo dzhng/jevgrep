@@ -32,6 +32,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
   const candidates = new Map<string, { path: string; contentHash: string; score: number }>();
   const files = new Map<string, FileEvidence>();
   const declarations = new Map<string, SelectionResult["declarations"]>();
+  const groupCounts = new Map<string, number>();
   const visited = new Set<string>();
   const pruned = new Map<string, NavigationItem>();
   const previews = new Map<string, FilePreview>();
@@ -67,7 +68,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     if (["authentication", "request-limit", "cancelled", "interrupted"].includes(kind)) stop = true;
   }
   async function snapshot(path: string) {
-    const result = await reader.readSnapshot(path);
+    const result = await reader.readSnapshot(path, { reuse: true });
     if (result.status === "issue") {
       issue(result.issue.kind);
       return;
@@ -151,7 +152,11 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       }
       pump();
     });
-    return results;
+    // Decisions return in item order, not batch completion order: the next level, pruned
+    // directories and relationship seeds are built from this order, and their batches are
+    // requests with cache keys.
+    const position = new Map(items.map((item, index) => [item, index]));
+    return results.sort((a, b) => position.get(a.item)! - position.get(b.item)!);
   }
   async function previewDirectory(path: string): Promise<DirectoryPreview | undefined> {
     const preview: DirectoryPreview = {
@@ -287,10 +292,25 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       preview.declarations = syntax.units
         .filter((unit) => !unit.partial)
         .map((unit) => ({ name: unit.name, ...unit.range }));
-      while (preview.declarations.length && Buffer.byteLength(JSON.stringify(preview)) > 32000) {
-        preview.declarations.pop();
+      // Keep the longest prefix of declarations that fits. Serialized size grows with each entry,
+      // so a binary search finds the same prefix as removing one declaration at a time.
+      const all = preview.declarations;
+      const fits = (count: number) => {
+        preview.declarations = all.slice(0, count);
+        return Buffer.byteLength(JSON.stringify(preview)) <= 32000;
+      };
+      if (all.length && !fits(all.length)) {
+        // Removal measured every shorter prefix with the truncation flag already set.
         preview.declarationIndexTruncated = true;
-      }
+        let low = 0,
+          high = all.length - 1;
+        while (low < high) {
+          const middle = Math.ceil((low + high) / 2);
+          if (fits(middle)) low = middle;
+          else high = middle - 1;
+        }
+        preview.declarations = all.slice(0, low);
+      } else preview.declarations = all;
     }
     return preview;
   }
@@ -421,7 +441,8 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     );
   }
   async function unchanged(candidate: { path: string; contentHash: string }) {
-    const result = await reader.readSnapshot(candidate.path);
+    // Unchanged file identity reuses the reader's earlier snapshot; any change rereads and rehashes.
+    const result = await reader.readSnapshot(candidate.path, { reuse: true });
     if (result.status === "ok" && result.snapshot.contentHash === candidate.contentHash) {
       inspected.add(candidate.path);
       return result.snapshot;
@@ -480,9 +501,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
         ).units;
         const classes = [
           ...new Set(
-            units
-              .filter((unit) => unit.name.endsWith(".context"))
-              .map((unit) => unit.name.split(".")[0]!),
+            units.filter((unit) => unit.classContext).map((unit) => unit.name.split(".")[0]!),
           ),
         ];
         if (classes.length && Buffer.byteLength(JSON.stringify(classes)) < 4000) {
@@ -551,6 +570,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
           );
           files.set(candidate.path, selection.file);
           declarations.set(candidate.path, selection.declarations);
+          groupCounts.set(candidate.path, selection.groups);
           for (const entry of selection.issues)
             if (entry.kind !== "source-invalid")
               issue(entry.kind, entry.count, selection.providerFailure);
@@ -565,8 +585,13 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       const selectEvidence = async () => {
         await select();
         const evidence: Evidence[] = [];
-        // Donors follow selection completion order; concurrent completion can affect request context.
-        for (const path of declarations.keys()) {
+        // Donor order is part of every follow-up request and its cache key. Files are selected
+        // concurrently, so completion order depends on network timing; donors use the order in
+        // which sequential selection would finish them instead: fewer groups first, then path.
+        const donors = [...declarations.keys()].sort(
+          (a, b) => groupCounts.get(a)! - groupCounts.get(b)! || (a < b ? -1 : a > b ? 1 : 0),
+        );
+        for (const path of donors) {
           const candidate = candidates.get(path)!;
           if (stop || input.signal.aborted) break;
           if (!files.get(candidate.path)!.excerpts.length) continue;
