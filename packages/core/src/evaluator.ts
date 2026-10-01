@@ -51,7 +51,7 @@ export function createEvaluator(options: {
   let cooldownUntil = 0;
   const rateBudget =
     options.provider === "typesafe"
-      ? createRateBudget({ tokensPerSecond: 250_000, requestsPerMinute: 1_200 })
+      ? createRateBudget({ tokensPerSecond: 100_000, requestsPerSecond: 40 })
       : undefined;
   const authenticationFailure = new AbortController();
   function assertActive() {

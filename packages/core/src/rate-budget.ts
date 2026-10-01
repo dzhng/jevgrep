@@ -1,6 +1,6 @@
-/** Per-evaluator rolling budgets. Concurrency remains owned by the evaluator. */
+/** Per-evaluator one-second rolling budgets. Concurrency remains owned by the evaluator. */
 export function createRateBudget(
-  limits: { tokensPerSecond: number; requestsPerMinute: number },
+  limits: { tokensPerSecond: number; requestsPerSecond: number },
   now = () => performance.now(),
 ) {
   const starts: Array<{ at: number; tokens: number }> = [];
@@ -8,14 +8,13 @@ export function createRateBudget(
     if (!Number.isSafeInteger(tokens) || tokens < 0 || tokens > limits.tokensPerSecond)
       throw new Error("Token reservation exceeds the rate budget");
     const time = now();
-    while (starts.length && starts[0]!.at <= time - 60_000) starts.shift();
+    while (starts.length && starts[0]!.at <= time - 1000) starts.shift();
     let wait =
-      starts.length >= limits.requestsPerMinute
-        ? starts[starts.length - limits.requestsPerMinute]!.at + 60_000 - time
+      starts.length >= limits.requestsPerSecond
+        ? starts[starts.length - limits.requestsPerSecond]!.at + 1000 - time
         : 0;
-    const recent = starts.filter((entry) => entry.at > time - 1000);
-    let total = recent.reduce((sum, entry) => sum + entry.tokens, 0) + tokens;
-    for (const entry of recent) {
+    let total = starts.reduce((sum, entry) => sum + entry.tokens, 0) + tokens;
+    for (const entry of starts) {
       if (total <= limits.tokensPerSecond) break;
       total -= entry.tokens;
       wait = Math.max(wait, entry.at + 1000 - time);
