@@ -189,7 +189,6 @@ test("routing rejects unknown destinations before HTTP", async (t) => {
 test("Node preload routes SDK-shaped fetches and rejects any other host", async (t) => {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
-  const { fileURLToPath } = await import("node:url");
   const run = promisify(execFile);
   const bodies = [];
   const http = await fixture(t, async (req, res) => {
@@ -198,9 +197,8 @@ test("Node preload routes SDK-shaped fetches and rejects any other host", async 
     bodies.push(Buffer.concat(chunks).toString());
     res.end("fixture-ok");
   });
-  const preload = fileURLToPath(
-    new URL("../../../test/fixtures/provider-route.mjs", import.meta.url),
-  );
+  // --import takes a URL; a bare Windows path such as C:\... is rejected as scheme "c:".
+  const preload = new URL("../../../test/fixtures/provider-route.mjs", import.meta.url).href;
   const options = { env: { JEVGREP_TEST_PROVIDER_ORIGIN: http.origin }, timeout: 5000 };
   const args = ["--import", preload, "--input-type=module", "-e"];
   const result = await run(

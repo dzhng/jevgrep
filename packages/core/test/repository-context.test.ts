@@ -2,7 +2,7 @@ import { expect } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { testIfDocker as test } from "../../../test/helpers/docker";
+import { posix, testIfDocker as test } from "../../../test/helpers/docker";
 import { createFilesystem } from "../src/filesystem";
 import { repositoryContext } from "../src/repository-context";
 import type { FileEvidence } from "../src/types";
@@ -34,8 +34,14 @@ test("repository context reports scoped guidance and marks excluded instructions
       instructionFiles: ["AGENTS.md", "a/b/AGENTS.md", "a/AGENTS.md"],
       instructionLookupIncomplete: false,
     });
-    await rm(join(root, "a/b/AGENTS.md"));
-    await symlink(join(root, "unrelated/AGENTS.md"), join(root, "a/b/AGENTS.md"));
+    if (posix) {
+      await rm(join(root, "a/b/AGENTS.md"));
+      await symlink(join(root, "unrelated/AGENTS.md"), join(root, "a/b/AGENTS.md"));
+    } else {
+      // Junctions exercise excluded guidance without requiring file-symlink privilege.
+      await rm(join(root, "a/b"), { recursive: true });
+      await symlink(join(root, "unrelated"), join(root, "a/b"), "junction");
+    }
     const unsafe = await repositoryContext(reader, [file]);
     expect(unsafe.instructionFiles).toEqual(["AGENTS.md", "a/AGENTS.md"]);
     expect(unsafe.instructionLookupIncomplete).toBe(true);

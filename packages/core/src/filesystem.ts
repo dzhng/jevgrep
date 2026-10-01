@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants, type BigIntStats, type Dir } from "node:fs";
 import { lstat, open, opendir, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import ignore, { type Ignore } from "ignore";
+import { storageDirectory } from "./storage";
 
 /** These independent switches broaden only their named exclusion category. */
 export type FilesystemPolicy = {
@@ -71,7 +71,7 @@ export const filesystemDefaults = Object.freeze({
 export type FilesystemOptions = {
   root: string;
   policy?: FilesystemPolicy;
-  /** Absolute credential/cache locations beyond the default XDG locations. Always excluded. */
+  /** Additional absolute credential/cache locations. Always excluded. */
   protectedPaths?: readonly string[];
   limits?: Partial<
     Pick<
@@ -142,18 +142,16 @@ export async function createFilesystem(options: FilesystemOptions) {
       throw new Error(`Invalid filesystem limit: ${name}`);
   }
   const protectedPaths = await Promise.all(
-    [
-      join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "jevgrep"),
-      join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "jevgrep"),
-      ...(options.protectedPaths ?? []),
-    ].map(async (path) => {
-      const absolute = resolve(path);
-      try {
-        return await realpath(absolute);
-      } catch {
-        return absolute;
-      }
-    }),
+    [storageDirectory("config"), storageDirectory("cache"), ...(options.protectedPaths ?? [])].map(
+      async (path) => {
+        const absolute = resolve(path);
+        try {
+          return await realpath(absolute);
+        } catch {
+          return absolute;
+        }
+      },
+    ),
   );
   const cursors = new Map<string, Cursor>();
   let closed = false;
@@ -203,7 +201,7 @@ export async function createFilesystem(options: FilesystemOptions) {
       // NONBLOCK prevents a concurrent replacement with a FIFO from hanging the process.
       handle = await open(
         identity.absolute,
-        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
       );
       const before = await handle.stat({ bigint: true });
       if (!before.isFile() || !same(identity.stat, before)) return issue("changed", identity.path);

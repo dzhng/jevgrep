@@ -12,9 +12,12 @@ export async function installSkill(
   if (command.yes) args.push("--yes");
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
-    const child = spawn("npx", args, {
+    const windows = process.platform === "win32";
+    // Windows needs a shell for npx.cmd. Agent names are restricted by parseCommand.
+    const child = spawn(windows ? `npx ${args.join(" ")}` : "npx", windows ? [] : args, {
       // Preserve installer prompts while keeping all CLI output on stdout.
       stdio: ["inherit", process.stdout, process.stdout],
+      shell: windows,
       signal,
       killSignal: "SIGINT",
     });

@@ -1,7 +1,52 @@
 import { expect } from "bun:test";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { testInDocker, withCli } from "./cli";
+import { posix, testInDocker, withCli } from "./cli";
+
+if (!posix)
+  testInDocker(
+    "Windows profile storage is used by auth and always excluded from inventory",
+    async () => {
+      await withCli(async ({ home, run }) => {
+        const env = {
+          XDG_CONFIG_HOME: "",
+          XDG_CACHE_HOME: "",
+          APPDATA: join(home, "roaming"),
+          LOCALAPPDATA: join(home, "local"),
+        };
+        const auth = await run(
+          ["auth", "--provider", "vercel", "--stdin"],
+          "profile-secret\n",
+          env,
+        );
+        expect(auth).toMatchObject({ code: 0, stderr: "" });
+        expect(
+          JSON.parse(await readFile(join(env.APPDATA, "jevgrep/credentials.json"), "utf8")),
+        ).toEqual({
+          provider: "vercel",
+          apiKey: "profile-secret",
+        });
+        await mkdir(join(env.LOCALAPPDATA, "jevgrep"), { recursive: true });
+        await writeFile(join(env.LOCALAPPDATA, "jevgrep/answer.json"), "cached answer");
+        await writeFile(join(home, "visible.py"), "def visible(): pass\n");
+        const inventory = await run(
+          [
+            "files",
+            ".",
+            "--hidden",
+            "--no-ignore",
+            "--include-dependencies",
+            "--include-sensitive",
+          ],
+          "",
+          env,
+        );
+        expect(inventory).toMatchObject({ code: 0, stderr: "" });
+        expect(inventory.stdout).toContain("Jevgrep files: 1 file eligible");
+        expect(inventory.stdout).toContain('"protected" 2');
+      });
+    },
+  );
 
 testInDocker("installed auth saves privately, bounds stdin, and never echoes keys", async () => {
   await withCli(async ({ home, run }) => {
@@ -15,8 +60,10 @@ testInDocker("installed auth saves privately, bounds stdin, and never echoes key
       provider: "vercel",
       apiKey: "test-gateway-secret",
     });
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
-    expect((await stat(join(home, "jevgrep"))).mode & 0o777).toBe(0o700);
+    if (posix) {
+      expect((await stat(file)).mode & 0o777).toBe(0o600);
+      expect((await stat(join(home, "jevgrep"))).mode & 0o777).toBe(0o700);
+    }
     const whitespace = await run(["auth", "--provider", "vercel", "--stdin"], "two secrets\n");
     expect(whitespace.code).toBe(1);
     expect(whitespace.stderr).toBe("");
@@ -77,8 +124,10 @@ testInDocker(
           model: "gateway/jev-2",
           apiKey: key,
         });
-        expect((await stat(file)).mode & 0o777).toBe(0o600);
-        expect((await stat(join(home, "jevgrep"))).mode & 0o777).toBe(0o700);
+        if (posix) {
+          expect((await stat(file)).mode & 0o777).toBe(0o600);
+          expect((await stat(join(home, "jevgrep"))).mode & 0o777).toBe(0o700);
+        }
         expect(requests).toHaveLength(0);
 
         const doctor = await run(["doctor"]);

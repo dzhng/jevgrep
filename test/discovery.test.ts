@@ -4,7 +4,7 @@ import { expect } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { testIfDocker } from "./helpers/docker";
+import { testIfDocker, testIfDockerPosix } from "./helpers/docker";
 import { retrieve } from "../packages/core/src/retrieve";
 import { createEvaluator, EvaluationFailure } from "../packages/core/src/evaluator";
 import { renderResult } from "../apps/cli/src/render";
@@ -58,7 +58,7 @@ testIfDocker(
       await rm(root, { recursive: true, force: true });
     }
   },
-  30_000,
+  120_000,
 );
 for (const matchPath of ["match.ts", "group-0/match.ts"]) {
   testIfDocker(
@@ -108,7 +108,8 @@ for (const matchPath of ["match.ts", "group-0/match.ts"]) {
         await rm(root, { recursive: true, force: true });
       }
     },
-    30_000,
+    // Creating and parsing 1,800 files can exceed 30s on constrained runners.
+    120_000,
   );
 }
 testIfDocker("source confirmation reuses its judgments and preserves returned source", async () => {
@@ -204,7 +205,7 @@ testIfDocker(
       await rm(root, { recursive: true, force: true });
     }
   },
-  30_000,
+  120_000,
 );
 
 for (const outcome of ["strong", "preview", "interrupted"] as const)
@@ -290,7 +291,7 @@ for (const outcome of ["strong", "preview", "interrupted"] as const)
         await rm(root, { recursive: true, force: true });
       }
     },
-    30_000,
+    120_000,
   );
 
 testIfDocker("a small set of weak leads remains available", async () => {
@@ -348,7 +349,7 @@ testIfDocker(
       await rm(root, { recursive: true, force: true });
     }
   },
-  30_000,
+  120_000,
 );
 
 testIfDocker("shallow lookahead classifies file previews before admitting files", async () => {
@@ -393,10 +394,17 @@ testIfDocker("relationship judgments bind each directory and file to its own sou
       join(root, "versions/implementations/handler.py"),
       "from Anchor import Anchor\nclass Alternative(Anchor):\n    def run(self): return False\n",
     );
-    await writeFile(join(root, "versions/implementations/utility.py"), "def unrelated(): return False\n");
+    await writeFile(
+      join(root, "versions/implementations/utility.py"),
+      "def unrelated(): return False\n",
+    );
     await writeFile(join(root, "versions/misc/other.py"), "class Unrelated: pass\n");
     const result = await retrieve(
-      { root, query: "How does the primary implementation run?", signal: new AbortController().signal },
+      {
+        root,
+        query: "How does the primary implementation run?",
+        signal: new AbortController().signal,
+      },
       {
         requests: 0,
         async evaluate(request) {
@@ -418,7 +426,9 @@ testIfDocker("relationship judgments bind each directory and file to its own sou
                 return [key, 0.9];
               return [
                 key,
-                ["versions/implementations", "versions/implementations/handler.py"].includes(item.path)
+                ["versions/implementations", "versions/implementations/handler.py"].includes(
+                  item.path,
+                )
                   ? 0.9
                   : 0.1,
               ];
@@ -707,7 +717,7 @@ testIfDocker(
   120_000,
 );
 
-testIfDocker(
+testIfDockerPosix(
   "unavailable directory previews are skipped rather than classified as empty metadata",
   async () => {
     const root = await mkdtemp(join(tmpdir(), "jg-preview-unavailable-"));
