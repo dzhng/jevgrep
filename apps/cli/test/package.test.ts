@@ -33,6 +33,7 @@ testInDocker(
           cwd: fileURLToPath(new URL("../", import.meta.url)),
           env,
           timeout: 120000,
+          windowsVerbatimArguments: !posix,
         },
       );
     try {
