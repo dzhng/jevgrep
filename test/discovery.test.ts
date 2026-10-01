@@ -394,10 +394,17 @@ testIfDocker("relationship judgments bind each directory and file to its own sou
       join(root, "versions/implementations/handler.py"),
       "from Anchor import Anchor\nclass Alternative(Anchor):\n    def run(self): return False\n",
     );
-    await writeFile(join(root, "versions/implementations/utility.py"), "def unrelated(): return False\n");
+    await writeFile(
+      join(root, "versions/implementations/utility.py"),
+      "def unrelated(): return False\n",
+    );
     await writeFile(join(root, "versions/misc/other.py"), "class Unrelated: pass\n");
     const result = await retrieve(
-      { root, query: "How does the primary implementation run?", signal: new AbortController().signal },
+      {
+        root,
+        query: "How does the primary implementation run?",
+        signal: new AbortController().signal,
+      },
       {
         requests: 0,
         async evaluate(request) {
@@ -419,7 +426,9 @@ testIfDocker("relationship judgments bind each directory and file to its own sou
                 return [key, 0.9];
               return [
                 key,
-                ["versions/implementations", "versions/implementations/handler.py"].includes(item.path)
+                ["versions/implementations", "versions/implementations/handler.py"].includes(
+                  item.path,
+                )
                   ? 0.9
                   : 0.1,
               ];
