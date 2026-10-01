@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { authenticate, configDirectory, loadCredentials } from "./auth";
+import { authenticate, loadCredentials } from "./auth";
 import { endpointFor } from "@repo/core/providers";
 import { storageDirectory } from "@repo/core/storage";
 import { help, parseCommand } from "./args";
@@ -32,10 +32,6 @@ async function write(text: string) {
   });
 }
 
-function cacheDirectory() {
-  return storageDirectory("cache");
-}
-
 async function main() {
   const command = parseCommand(process.argv.slice(2));
   switch (command.kind) {
@@ -50,7 +46,7 @@ async function main() {
       return authenticate(command, controller.signal);
     case "cache-clear": {
       const { createEvaluationCache } = await import("@repo/core");
-      const cache = createEvaluationCache({ directory: cacheDirectory() });
+      const cache = createEvaluationCache({ directory: storageDirectory("cache") });
       await cache.clear();
       if (cache.stats().issues.length)
         throw new CliError("Could not completely clear the cache. Check its permissions.");
@@ -104,7 +100,6 @@ async function main() {
         root: command.root,
         policy: command.policy,
         signal: controller.signal,
-        protectedPaths: [configDirectory(), cacheDirectory()],
       });
       if (pipeClosed) return;
       await write(renderInventory(result));
@@ -116,7 +111,7 @@ async function main() {
       const credentials = await loadCredentials();
       const { retrieve, createEvaluator, createEvaluationCache } = await import("@repo/core");
       const cache = createEvaluationCache({
-        directory: cacheDirectory(),
+        directory: storageDirectory("cache"),
         enabled: !command.noCache,
       });
       const evaluator = createEvaluator({
@@ -133,7 +128,6 @@ async function main() {
           query: command.query,
           policy: command.policy,
           signal: controller.signal,
-          protectedPaths: [configDirectory(), cacheDirectory()],
         },
         evaluator,
       );

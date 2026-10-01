@@ -68,9 +68,9 @@ These answers need neither `probabilities` nor `confidence`. A server that deman
 
 Credentials are saved under
 `$XDG_CONFIG_HOME/jevgrep/credentials.json`, or `~/.config/jevgrep/credentials.json`.
-On Windows without `XDG_CONFIG_HOME`, they are saved in `%APPDATA%\jevgrep\credentials.json`
-and the cache lives in `%LOCALAPPDATA%\jevgrep`. Windows ignores POSIX file modes, so
-these files rely on the user profile's access controls.
+On Windows, config defaults to `%APPDATA%\jevgrep` and cache to `%LOCALAPPDATA%\jevgrep`.
+`XDG_CONFIG_HOME` and `XDG_CACHE_HOME` override their respective locations independently.
+Windows ignores POSIX file modes, so these files rely on the user profile's access controls.
 Existing saved records without a provider still mean Vercel, without a migration.
 API-key, endpoint, and model environment overrides are ignored; users who only
 configured an environment key must run auth. There is no automatic fallback or

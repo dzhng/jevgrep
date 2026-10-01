@@ -16,10 +16,6 @@ import {
 import { storageDirectory } from "@repo/core/storage";
 import { CliError } from "./errors";
 
-export function configDirectory() {
-  return storageDirectory("config");
-}
-
 function validateKey(raw: string): string {
   const key = raw.trim();
   if (!key || /\s/.test(key) || Buffer.byteLength(key) > 8192) {
@@ -103,7 +99,7 @@ async function promptEndpoint(signal: AbortSignal): Promise<CustomEndpoint> {
 }
 
 async function save(credentials: Credentials, signal: AbortSignal) {
-  const directory = configDirectory();
+  const directory = storageDirectory("config");
   signal.throwIfAborted();
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700);
@@ -178,7 +174,7 @@ export async function authenticate(options: AuthOptions, signal: AbortSignal) {
 export async function loadCredentials(): Promise<Credentials> {
   try {
     const credentials = JSON.parse(
-      await readFile(join(configDirectory(), "credentials.json"), "utf8"),
+      await readFile(join(storageDirectory("config"), "credentials.json"), "utf8"),
     );
     if (typeof credentials.apiKey !== "string" || !credentials.apiKey.trim()) {
       throw new CliError("Invalid credentials. Run jg auth again.");

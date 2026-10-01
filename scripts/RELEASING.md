@@ -45,10 +45,15 @@ archive without Bun, use `node scripts/test-native.mjs --prebuilt /path/package.
 The command prints the archive hash and actual Node/macOS runtime for retained
 evidence. It requires Node 22 or newer; a result proves the printed version only.
 
+The [Windows workflow](../.github/workflows/windows.yml) builds and installs an npm
+tarball in a temporary prefix, then runs portable suites against that installed
+CLI. It checks profile storage, protected-path exclusions, and the Windows
+installer launcher on the supported Node versions. POSIX-only fixtures remain
+in the Docker suites.
+
 Native installation uses temporary npm configuration, HOME, and XDG directories.
 The installed process receives a PATH containing only Node, so host Python, Bun,
 and compiler installations cannot satisfy runtime dependencies. All fixture
 credentials are synthetic, and local commands must make no Gateway requests.
-This bounded smoke complements the Docker suites; filesystem-policy tests still
-run only in their isolated Docker environment. npm installation needs network
+This bounded smoke complements the Docker and Windows suites. npm installation needs network
 access to resolve the exact runtime dependencies; search uses only loopback HTTP.

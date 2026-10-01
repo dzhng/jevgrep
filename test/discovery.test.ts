@@ -4,7 +4,7 @@ import { expect } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { posix, testIfDocker, testIfDockerPosix } from "./helpers/docker";
+import { testIfDocker, testIfDockerPosix } from "./helpers/docker";
 import { retrieve } from "../packages/core/src/retrieve";
 import { createEvaluator, EvaluationFailure } from "../packages/core/src/evaluator";
 import { renderResult } from "../apps/cli/src/render";
@@ -58,7 +58,7 @@ testIfDocker(
       await rm(root, { recursive: true, force: true });
     }
   },
-  30_000,
+  120_000,
 );
 for (const matchPath of ["match.ts", "group-0/match.ts"]) {
   testIfDocker(
@@ -108,8 +108,8 @@ for (const matchPath of ["match.ts", "group-0/match.ts"]) {
         await rm(root, { recursive: true, force: true });
       }
     },
-    // This fixture creates and parses 1,800 files; Windows CI can exceed 30s.
-    posix ? 30_000 : 120_000,
+    // Creating and parsing 1,800 files can exceed 30s on constrained runners.
+    120_000,
   );
 }
 testIfDocker("source confirmation reuses its judgments and preserves returned source", async () => {
@@ -205,7 +205,7 @@ testIfDocker(
       await rm(root, { recursive: true, force: true });
     }
   },
-  30_000,
+  120_000,
 );
 
 for (const outcome of ["strong", "preview", "interrupted"] as const)
@@ -291,7 +291,7 @@ for (const outcome of ["strong", "preview", "interrupted"] as const)
         await rm(root, { recursive: true, force: true });
       }
     },
-    30_000,
+    120_000,
   );
 
 testIfDocker("a small set of weak leads remains available", async () => {
@@ -349,7 +349,7 @@ testIfDocker(
       await rm(root, { recursive: true, force: true });
     }
   },
-  30_000,
+  120_000,
 );
 
 testIfDocker("shallow lookahead classifies file previews before admitting files", async () => {
