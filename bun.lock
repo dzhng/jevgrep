@@ -13,7 +13,7 @@
     },
     "apps/cli": {
       "name": "@dzhng/jevgrep",
-      "version": "0.7.1",
+      "version": "0.8.0",
       "bin": {
         "jg": "./dist/bin/index.js",
       },
