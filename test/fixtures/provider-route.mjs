@@ -4,6 +4,7 @@ const endpoints = new Set([
   "https://api.typesafe.ai/v1/systemone",
   "https://openrouter.ai/api/v1/systemone",
   "https://opencode.ai/zen/v1/systemone",
+  "https://api.kilo.ai/api/gateway/typesafe/v1/systemone",
 ]);
 export function routeProviderFetch(originalFetch, origin) {
   return async (input, init) => {

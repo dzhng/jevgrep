@@ -29,7 +29,16 @@ For unattended setup, pipe the key from your secret manager to:
 jg auth --provider opencode --stdin
 ```
 
-Both options are required for piped setup. To send traffic through your own
+Both options are required for piped setup.
+
+For Kilo Gateway, choose `kilo` in interactive auth or pipe a Kilo key using
+`jg auth --provider kilo --stdin`. To bill an organization, add
+`--org-id YOUR-ORGANIZATION-UUID` to that auth command, or enter the ID at the
+interactive prompt. Without an ID, the gateway uses the account bound to your
+key. The key must be accepted by Kilo Gateway and have Jev access and credits;
+an organization ID requires membership and access to the Jev model.
+
+To send traffic through your own
 TypeSafe-compatible gateway, choose “Custom endpoint” in `auth` and enter its base
 URL and model ID, or pass both explicitly:
 

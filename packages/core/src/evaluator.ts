@@ -4,6 +4,7 @@ import { endpointFor, type CredentialProvider } from "./providers";
 import { type createEvaluationCache, type CacheInput } from "./cache";
 import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
+import { createHash } from "node:crypto";
 import { createRateBudget, estimatedInputTokens } from "./rate-budget";
 
 export type EvaluationRequest = {
@@ -31,6 +32,7 @@ export class EvaluationFailure extends Error {
 export function createEvaluator(options: {
   provider: CredentialProvider;
   apiKey: string;
+  organizationId?: string;
   baseURL?: string;
   model?: string;
   cache?: ReturnType<typeof createEvaluationCache>;
@@ -42,6 +44,8 @@ export function createEvaluator(options: {
   concurrency?: number;
 }) {
   const endpoint = endpointFor(options);
+  const credential =
+    options.provider === "kilo" ? createHash("sha256").update(options.apiKey).digest("hex") : "";
   const concurrency = options.concurrency ?? 32;
   const timeoutMs = options.timeoutMs ?? (options.provider === "typesafe" ? 60_000 : 15_000);
   if (!Number.isSafeInteger(concurrency) || concurrency < 1)
@@ -82,6 +86,9 @@ export function createEvaluator(options: {
   const provider = createTypeSafeAi({
     apiKey: options.apiKey,
     baseURL: endpoint.baseURL,
+    ...(options.provider === "kilo" && options.organizationId
+      ? { headers: { "X-KiloCode-OrganizationId": options.organizationId } }
+      : {}),
     fetch: async (input, init) => {
       assertActive();
       if (requests >= (options.requestLimit ?? 50_000))
@@ -124,6 +131,12 @@ export function createEvaluator(options: {
           model: endpoint.model,
           provider: options.provider,
           endpoint: endpoint.baseURL,
+          ...(options.provider === "kilo"
+            ? {
+                organizationId: options.organizationId ?? "",
+                credential,
+              }
+            : {}),
           protocol: "typesafe-ai-3.0.8",
           policyVersion: options.policyVersion ?? "1",
           parserVersion: "tree-sitter-0.27.0-python-0.25.0-go-0.25.0-rust-0.24.0-ts-5.9.3",

@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createEvaluationCache } from "../packages/core/src/cache";
 import { createEvaluator, EvaluationFailure } from "../packages/core/src/evaluator";
+import { createEvaluationCache } from "../packages/core/src/cache";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 test("Jev uses native state and validated boolean probabilities through real HTTP", async () => {
   const state = {
@@ -37,6 +41,65 @@ test("Jev uses native state and validated boolean probabilities through real HTT
     expect(evaluator.requests).toBe(1);
   } finally {
     server.stop(true);
+  }
+});
+
+test("Kilo sends the selected organization and separates cached answers by billing context", async () => {
+  const organizationA = "123e4567-e89b-42d3-a456-426614174000";
+  const organizationB = "123e4567-e89b-42d3-a456-426614174001";
+  const seen: Array<string | null> = [];
+  const directory = await mkdtemp(join(tmpdir(), "jevgrep-kilo-"));
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      expect(new URL(request.url).pathname).toBe("/api/gateway/typesafe/v1/systemone");
+      expect(["Bearer fixture", "Bearer other-fixture"]).toContain(
+        request.headers.get("authorization"),
+      );
+      expect(await request.json()).toEqual({
+        model: "typesafe/jev-1.13",
+        state: "find event recording",
+        questions: { useful: { type: "noul", instructions: "Relevant?" } },
+      });
+      seen.push(request.headers.get("x-kilocode-organizationid"));
+      return Response.json({
+        id: "fixture-evaluation",
+        model: "typesafe/jev-1.13",
+        answers: { useful: { type: "noul", noul: 0.8 } },
+        usage: { input_tokens: 12, output_tokens: 2, cost: 0.0001 },
+      });
+    },
+  });
+  try {
+    const cache = createEvaluationCache({ directory });
+    const request = {
+      state: "find event recording",
+      questions: { useful: { type: "boolean" as const, instructions: "Relevant?" } },
+    };
+    for (const [index, [organizationId, apiKey]] of (
+      [
+        [undefined, "fixture"],
+        [organizationA, "fixture"],
+        [organizationB, "fixture"],
+        [organizationA, "fixture"],
+        [organizationA, "other-fixture"],
+      ] as const
+    ).entries()) {
+      const evaluator = createEvaluator({
+        apiKey,
+        provider: "kilo",
+        organizationId,
+        cache,
+        fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+        signal: new AbortController().signal,
+      });
+      expect(await evaluator.evaluate(request)).toEqual({ useful: 0.8 });
+      expect(evaluator.requests).toBe(index === 3 ? 0 : 1);
+    }
+    expect(seen).toEqual([null, organizationA, organizationB, organizationA]);
+  } finally {
+    server.stop(true);
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

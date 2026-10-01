@@ -15,6 +15,7 @@ import {
   type ProviderId,
 } from "@repo/core/providers";
 import { CliError } from "./errors";
+import { isOrganizationId } from "./args";
 
 export function configDirectory() {
   return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "jevgrep");
@@ -29,13 +30,14 @@ function validateKey(raw: string): string {
 }
 
 export type Credentials =
-  | { provider: ProviderId; apiKey: string }
+  | { provider: ProviderId; apiKey: string; organizationId?: string }
   | { provider: typeof customProviderId; baseURL: string; model: string; apiKey: string };
 
 export type AuthOptions = {
   provider?: CredentialProvider;
   baseURL?: string;
   model?: string;
+  organizationId?: string;
 };
 
 type CustomEndpoint = { baseURL: string; model: string };
@@ -133,7 +135,13 @@ export async function authenticate(options: AuthOptions, signal: AbortSignal) {
       const endpoint = customEndpoint(options);
       credentials = { provider: customProviderId, ...endpoint, apiKey: await readKey(signal) };
     } else {
-      credentials = { provider: options.provider, apiKey: await readKey(signal) };
+      credentials = {
+        provider: options.provider,
+        apiKey: await readKey(signal),
+        ...(options.provider === "kilo" && options.organizationId
+          ? { organizationId: options.organizationId }
+          : {}),
+      };
     }
   } else {
     if (!process.stdin.isTTY)
@@ -167,6 +175,17 @@ export async function authenticate(options: AuthOptions, signal: AbortSignal) {
         provider: selected,
         apiKey: await readPassword(`Paste your ${providers[selected].label} API key`, signal),
       };
+      if (selected === "kilo") {
+        const organizationId = await text({
+          message: "Organization ID (optional; leave blank for key's default account)",
+          validate: (value) =>
+            value && !isOrganizationId(value) ? "Enter a valid organization UUID." : undefined,
+          output: process.stdout,
+          signal,
+        });
+        if (isCancel(organizationId)) throw new DOMException("Interrupted", "AbortError");
+        if (organizationId) credentials = { ...credentials, organizationId };
+      }
     }
   }
   await save(credentials, signal);
@@ -186,6 +205,9 @@ export async function loadCredentials(): Promise<Credentials> {
     const provider = Object.hasOwn(credentials, "provider") ? credentials.provider : "vercel";
     if (!isCredentialProvider(provider)) throw new CliError("Invalid provider. Run jg auth again.");
     const apiKey = validateKey(credentials.apiKey);
+    const organizationId = credentials.organizationId;
+    if (organizationId !== undefined && (provider !== "kilo" || !isOrganizationId(organizationId)))
+      throw new CliError("Invalid organization ID. Run jg auth again.");
     if (provider === customProviderId) {
       return {
         provider,
@@ -194,7 +216,7 @@ export async function loadCredentials(): Promise<Credentials> {
         apiKey,
       };
     }
-    return { provider, apiKey };
+    return { provider, apiKey, ...(organizationId ? { organizationId } : {}) };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new CliError("Run jg auth or use jg auth --provider NAME --stdin.");

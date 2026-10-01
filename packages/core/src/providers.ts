@@ -19,6 +19,11 @@ export const providers = {
     baseURL: "https://opencode.ai/zen/v1",
     model: "jev-1.13",
   },
+  kilo: {
+    label: "Kilo Gateway",
+    baseURL: "https://api.kilo.ai/api/gateway/typesafe/v1",
+    model: "typesafe/jev-1.13",
+  },
 } as const;
 
 export type ProviderId = keyof typeof providers;

@@ -25,7 +25,7 @@ jg skill
 jg "How are telemetry events recorded and sent?" ./my-project
 ```
 
-Requires **Node.js 22+**, **macOS or Linux**, and a key for **Vercel AI Gateway, TypeSafe, OpenRouter, OpenCode Zen, or a custom TypeSafe-compatible endpoint**.
+Requires **Node.js 22+**, **macOS or Linux**, and a key for **Vercel AI Gateway, TypeSafe, OpenRouter, OpenCode Zen, Kilo Gateway, or a custom TypeSafe-compatible endpoint**.
 No separate Python, Bun, or ripgrep installation is required to use `jg`.
 
 Provider selection requires **0.3.0 or newer**. Upgrade an older installation with
@@ -140,6 +140,8 @@ relative to the root, for example `--exclude '**/*.test.ts' --exclude 'src/gener
 
 `jg auth` asks for your provider, then saves its key in an owner-only config file.
 Re-running auth replaces that setup; searches always use the saved provider.
+For Kilo Gateway, auth optionally saves an organization ID to use for billing;
+omit it to use the account selected by your key.
 `jg doctor` checks it with synthetic input. Existing saved keys without a provider
 remain Vercel keys. Environment-based credentials and endpoint overrides are not
 used; run `jg auth` if you previously relied on them.

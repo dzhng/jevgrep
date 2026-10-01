@@ -71,10 +71,26 @@ test("auth requires explicit provider for stdin and keeps provider selection out
     kind: "auth",
     provider: "opencode",
   });
+  expect(
+    parseCommand([
+      "auth",
+      "--provider",
+      "kilo",
+      "--org-id",
+      "123e4567-e89b-42d3-a456-426614174000",
+      "--stdin",
+    ]),
+  ).toEqual({
+    kind: "auth",
+    provider: "kilo",
+    organizationId: "123e4567-e89b-42d3-a456-426614174000",
+  });
   for (const args of [
     ["auth", "--stdin"],
     ["auth", "--provider", "vercel"],
     ["auth", "--provider", "unknown", "--stdin"],
+    ["auth", "--provider", "vercel", "--org-id", "123e4567-e89b-42d3-a456-426614174000", "--stdin"],
+    ["auth", "--provider", "kilo", "--org-id", "not-a-uuid", "--stdin"],
     ["query", "--provider", "typesafe"],
     ["doctor", "--provider", "vercel"],
     ["skill", "--provider", "vercel"],
