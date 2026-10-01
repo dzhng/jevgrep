@@ -4,7 +4,7 @@ import { expect } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { testIfDocker, testIfDockerPosix } from "./helpers/docker";
+import { posix, testIfDocker, testIfDockerPosix } from "./helpers/docker";
 import { retrieve } from "../packages/core/src/retrieve";
 import { createEvaluator, EvaluationFailure } from "../packages/core/src/evaluator";
 import { renderResult } from "../apps/cli/src/render";
@@ -108,7 +108,8 @@ for (const matchPath of ["match.ts", "group-0/match.ts"]) {
         await rm(root, { recursive: true, force: true });
       }
     },
-    30_000,
+    // This fixture creates and parses 1,800 files; Windows CI can exceed 30s.
+    posix ? 30_000 : 120_000,
   );
 }
 testIfDocker("source confirmation reuses its judgments and preserves returned source", async () => {
