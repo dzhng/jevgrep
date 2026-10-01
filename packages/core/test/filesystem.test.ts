@@ -382,7 +382,7 @@ test("one reader observes same-size ignore edits with restored timestamps and re
 test("protected storage remains excluded when explicit root resolves through its alias", async () => {
   const store = await fixture({ credential: "NEVER_UPLOAD" });
   const root = await fixture({});
-  await symlink(store, join(root, "alias"));
+  await symlink(store, join(root, "alias"), "junction");
   const reader = await createFilesystem({
     root: store,
     protectedPaths: [join(root, "alias")],

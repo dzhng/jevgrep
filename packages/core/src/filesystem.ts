@@ -71,7 +71,7 @@ export const filesystemDefaults = Object.freeze({
 export type FilesystemOptions = {
   root: string;
   policy?: FilesystemPolicy;
-  /** Absolute credential/cache locations beyond the default XDG locations. Always excluded. */
+  /** Additional absolute credential/cache locations. Always excluded. */
   protectedPaths?: readonly string[];
   limits?: Partial<
     Pick<

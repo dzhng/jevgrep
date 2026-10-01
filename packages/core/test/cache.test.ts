@@ -204,7 +204,7 @@ test("unavailable or symlinked cache locations never throw or modify the target"
   await mkdir(target, { recursive: true });
   await writeFile(join(target, "sentinel"), "DO_NOT_TOUCH");
   const alias = await directory();
-  await symlink(target, alias);
+  await symlink(target, alias, "junction");
   const cache = createEvaluationCache({ directory: alias });
   expect(await cache.get(input)).toBeUndefined();
   await cache.put(input, { question1: 1 });
