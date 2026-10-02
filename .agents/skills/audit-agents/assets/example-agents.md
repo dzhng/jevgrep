@@ -18,7 +18,7 @@ Optimize for iteration speed. The measure is the time to feedback you can trust,
 
 Run the narrowest check that answers your question: one test, then one file, then one package. That is the proof for everyday work, including a commit, a merge and a push.
 
-**Run everything once, when a plan's implementation is finished.** Running everything is slow and saturates the machine. Until then a change is checked by what it can move: its own tests and the output it touches. That is enough for a commit, a merge, a push and a finished feature. A failure that only the full run finds is fixed at the end; that is cheaper than gating every step.
+**Run everything once, when a spec's implementation is finished.** Running everything is slow and saturates the machine. Until then a change is checked by what it can move: its own tests and the output it touches. That is enough for a commit, a merge, a push and a finished feature. A failure that only the full run finds is fixed at the end; that is cheaper than gating every step.
 
 A change that reaches the whole system does not bring that run forward on its own. While more work is coming, the full run still waits for the end. Run it sooner only when the next piece of work can't be trusted without it.
 

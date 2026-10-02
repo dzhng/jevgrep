@@ -25,7 +25,7 @@ AGENTS.md is read by everyone who will ever work on the project. Picture the nex
 - **A thousand people.** A newcomer can act on it without knowing this session, this author or this month's work.
 - **Changes what they do.** Delete a line a capable contributor already follows.
 - **Plain and concrete.** A principle is not an abstraction. "Look at the picture" works; "match verification to the claim" doesn't. Prefer a short sentence with its consequence, and one example from the product over a general noun.
-- **Iteration speed.** This is the core principle and must be stated outright: optimize the time to feedback you can trust, run the narrowest check that answers the question, and run everything once, when the plan's implementation is finished. Flag any rule that adds process to every loop, puts the full run before a commit, merge, push or finished feature, or names checkpoints for it along the way. The full run comes earlier only when the next piece of work can't be trusted without it. Never trade away a real acceptance requirement for speed.
+- **Iteration speed.** This is the core principle and must be stated outright: optimize the time to feedback you can trust, run the narrowest check that answers the question, and run everything once, when the spec's implementation is finished. Flag any rule that adds process to every loop, puts the full run before a commit, merge, push or finished feature, or names checkpoints for it along the way. The full run comes earlier only when the next piece of work can't be trusted without it. Never trade away a real acceptance requirement for speed.
 
 ## Shape
 
