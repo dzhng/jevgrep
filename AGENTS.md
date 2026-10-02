@@ -20,6 +20,8 @@ Run the narrowest check that answers your question: one test, then one file, the
 
 **The full gates are for milestones only.** Running everything is slow and saturates the machine, so it happens at a milestone the plan names in advance (a spec's stated checkpoint, a release) and once when a spec is closed. It is not a step before each commit, merge or push, and never a feedback loop. An agent working on one piece of a plan does not run it; whoever integrates the plan does, at the milestone.
 
+A big change (a full spec, a major feature) ends by running the closeout gate its spec names, once, before the work is called done.
+
 Between milestones, a change is checked by what it can move: its own tests and the output it touches. A failure found later at a milestone is fixed then; that is cheaper than gating every step.
 
 Every expensive run must answer a question a cheaper one can't. Benchmark runs, which spend real money, and the container tests of the installed package are the expensive runs here; do only the ones a change can move. Reuse a result that is still valid, and rerun only what a change could have invalidated. Docs and data that no code reads need no run at all.
