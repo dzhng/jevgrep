@@ -223,6 +223,25 @@ function empty() {
   };
 }
 
+test("inventory lists quoted paths without hiding incomplete status", () => {
+  const output = renderInventory({
+    ...empty(),
+    status: "incomplete",
+    files: 2,
+    paths: ["config/database.yml", "src/line\nbreak\u001b[31m\u202e.ts"],
+    issues: [{ kind: "resource_limit", count: 1 }],
+  });
+  expect(output).toContain("listing incomplete");
+  expect(output).toContain(
+    'Eligible paths:\n- "config/database.yml"\n- "src/line\\nbreak\\u001b[31m\\u202e.ts"',
+  );
+  expect(output).not.toContain("\u001b");
+  expect(output).not.toContain("\u202e");
+  expect(output.match(/^End files\.$/gm)).toHaveLength(1);
+  expect(renderInventory({ ...empty(), paths: [] })).toContain("Eligible paths: none.");
+  expect(renderInventory(empty())).not.toContain("Eligible paths:");
+});
+
 test("inventory sizes choose their unit after rounding", () => {
   const total = (bytes: number) =>
     renderInventory({ ...empty(), bytes })

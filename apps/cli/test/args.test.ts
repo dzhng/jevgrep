@@ -142,6 +142,17 @@ test("files takes an optional root and only the filesystem policy flags", () => 
     expect(() => parseCommand(args)).toThrow("Usage: jg files");
 });
 
+test("files lists eligible paths only when explicitly requested", () => {
+  expect(parseCommand(["files", "src", "--list", "--exclude", "generated/"])).toMatchObject({
+    kind: "files",
+    root: "src",
+    list: true,
+    policy: { exclude: ["generated/"] },
+  });
+  for (const args of [["question"], ["doctor"], ["auth"], ["skill"], ["cache", "clear"]])
+    expect(() => parseCommand([...args, "--list"])).toThrow();
+});
+
 test("exclude patterns are repeatable, normalized for cache identity, and limited to search or files", () => {
   expect(
     parseCommand([
