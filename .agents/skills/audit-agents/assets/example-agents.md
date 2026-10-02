@@ -18,9 +18,9 @@ Optimize for iteration speed. The measure is the time to feedback you can trust,
 
 Run the narrowest check that answers your question: one test, then one file, then one package. That is the proof for everyday work, including a commit, a merge and a push.
 
-**The full gates are for milestones only.** Running everything is slow and saturates the machine, so it happens at a milestone the plan names in advance (a spec's stated checkpoint, a release) and once when a spec is closed. It is not a step before each commit, merge or push, and never a feedback loop. An agent working on one piece of a plan does not run it; whoever integrates the plan does, at the milestone.
+**Run everything once, when a plan's implementation is finished.** Running everything is slow and saturates the machine. Until then a change is checked by what it can move: its own tests and the output it touches. That is enough for a commit, a merge, a push and a finished feature. A failure that only the full run finds is fixed at the end; that is cheaper than gating every step.
 
-Between milestones, a change is checked by what it can move: its own tests and the output it touches. A failure found later at a milestone is fixed then; that is cheaper than gating every step.
+A change that reaches the whole system does not bring that run forward on its own. While more work is coming, the full run still waits for the end. Run it sooner only when the next piece of work can't be trusted without it.
 
 Every expensive run must answer a question a cheaper one can't. <Name this product's expensive runs>; do only the ones a change can move. Reuse a result that is still valid, and rerun only what a change could have invalidated. Docs and data that no code reads need no run at all.
 
