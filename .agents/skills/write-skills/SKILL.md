@@ -199,7 +199,10 @@ One short paragraph defining the job.
 
 When creating or revising a skill:
 
-- Name it with lowercase hyphen-case; keep the folder name identical.
+- Prefer **action + plural noun** in lowercase hyphen-case: `audit-tests`,
+  `write-skills`, `compare-screenshots`. Keep the folder and frontmatter name
+  identical. Use a natural exception when pluralizing would distort the meaning;
+  this is the default for new names, not a mandate to rename existing skills.
 - Make the description specific enough to trigger without the body.
 - Remove any "when to use" section from the body.
 - Remove stale history, attribution, placeholders, and setup notes.
