@@ -131,7 +131,7 @@ try {
       "--test-reporter=tap",
       "--test-concurrency=1",
       "--test-name-pattern",
-      "^(installed Go/Rust search indexes late methods and selects their source instead of distant noise|installed local commands match the package without credentials|skill command delegates installation to npx without credentials|actual installed search parses Python and returns every relevant hierarchy branch|installed saved-provider journey: (vercel|typesafe|openrouter) auth doctor search cache replacement|installed legacy credentials use Vercel without rewriting saved bytes|installed saved credentials defeat conflicting environment and environment-only auth fails|installed invalid saved providers fail before HTTP without rewriting credentials|installed invalid auth preserves saved bytes and leaves no temporary credentials)$",
+      "^(installed Go/Rust search indexes late methods and selects their source instead of distant noise|installed local commands match the package without credentials|skill command delegates installation to npx without credentials|actual installed search parses Python and returns every relevant hierarchy branch|installed search keeps multiline TypeScript declaration labels on one output line|installed saved-provider journey: (vercel|typesafe|openrouter) auth doctor search cache replacement|installed legacy credentials use Vercel without rewriting saved bytes|installed saved credentials defeat conflicting environment and environment-only auth fails|installed invalid saved providers fail before HTTP without rewriting credentials|installed invalid auth preserves saved bytes and leaves no temporary credentials)$",
       join(root, "test/installed.test.mjs"),
     ],
     { cwd: scratch, env: runtimeEnv, timeout: 120_000, maxBuffer: 8_000_000 },
@@ -139,7 +139,7 @@ try {
   assert.equal(tested.stderr, "");
   assert.match(
     tested.stdout,
-    /^# pass 11$/m,
+    /^# pass 12$/m,
     "All native smoke journeys must execute; renamed selectors cannot silently pass",
   );
   console.log(tested.stdout.trimEnd());

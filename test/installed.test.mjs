@@ -184,7 +184,9 @@ async function context(t, mode = "healthy", executable = binary) {
         probabilities = body.state.items.map((item) =>
           mode === "negative"
             ? 0.05
-            : item.kind === "directory" || item.path.endsWith(".py")
+            : item.kind === "directory" ||
+                item.path.endsWith(".py") ||
+                (mode === "symbol-labels" && item.path.endsWith(".ts"))
               ? 0.95
               : 0.05,
         );
@@ -203,7 +205,11 @@ async function context(t, mode = "healthy", executable = binary) {
           assert.ok(declaration, `Missing declaration for ${id}`);
           assert.ok(Number.isInteger(declaration.startLine) && declaration.startLine >= 1);
           assert.ok(declaration.endLine >= declaration.startLine);
-          return match[1] === "scope" || declaration.name.endsWith(".record_event") ? 0.95 : 0.05;
+          return match[1] === "scope" ||
+            declaration.name.endsWith(".record_event") ||
+            (mode === "symbol-labels" && declaration.name.includes("recordEvent"))
+            ? 0.95
+            : 0.05;
         });
       } else if (Object.hasOwn(body.questions, "implementation")) {
         probabilities = Object.keys(body.questions).map((name) =>
@@ -560,6 +566,25 @@ test("actual installed search parses Python and returns every relevant hierarchy
   assert.ok(
     fixture.requests.length > before,
     "A preceding --no-cache search must not populate reusable answers",
+  );
+});
+
+test("installed search keeps multiline TypeScript declaration labels on one output line", async (t) => {
+  const fixture = await context(t, "symbol-labels");
+  await rm(fixture.tree, { recursive: true });
+  await mkdir(fixture.tree);
+  await writeFile(
+    join(fixture.tree, "events.ts"),
+    "const {\n  recordEvent,\n  flush\n} = createCollector();\n",
+  );
+  const result = await fixture.run([query, "--no-cache"]);
+  assert.equal(result.code, 0, result.stdout);
+  assert.match(result.stdout, /^  "\{\\n  recordEvent,\\n  flush\\n\}"@1-4$/m);
+  assert.equal(result.stdout.match(/^End context\.$/gm)?.length, 1);
+  assert.ok(
+    fixture.requests.some(({ body }) =>
+      body.state.declarations?.some((declaration) => declaration.name.includes("recordEvent")),
+    ),
   );
 });
 

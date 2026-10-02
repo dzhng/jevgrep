@@ -3,9 +3,14 @@ import { navigationByteBudget } from "@repo/core";
 
 function quote(value: string): string {
   return JSON.stringify(value).replace(
-    /[\u007f-\u009f\u2028-\u202e\u2066-\u2069]/g,
+    /[\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/g,
     (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
   );
+}
+
+function inlineLabel(value: string): string {
+  const escaped = quote(value);
+  return escaped.slice(1, -1) === value ? value : escaped;
 }
 
 export const DEFAULT_MAX_SOURCE_BYTES = 0;
@@ -93,10 +98,10 @@ export function renderResult(
       `- ${quote(file.path)}`,
       ...[...file.leads]
         .sort((a, b) => a.range.startLine - b.range.startLine)
-        .map((lead) => `  ${lead.name}@${lead.range.startLine}-${lead.range.endLine}`),
+        .map((lead) => `  ${inlineLabel(lead.name)}@${lead.range.startLine}-${lead.range.endLine}`),
       ...(file.callLeads ?? []).map(
         (call) =>
-          `  Possible local call ${call.caller} -> ${call.name}: lines ${call.range.startLine}-${call.range.endLine}${call.unknownEarlierBases.length ? `; earlier base(s) ${call.unknownEarlierBases.map(quote).join(", ")} not inspected` : ""}; runtime dispatch not verified.`,
+          `  Possible local call ${inlineLabel(call.caller)} -> ${inlineLabel(call.name)}: lines ${call.range.startLine}-${call.range.endLine}${call.unknownEarlierBases.length ? `; earlier base(s) ${call.unknownEarlierBases.map(quote).join(", ")} not inspected` : ""}; runtime dispatch not verified.`,
       ),
       ...(omitted ? ["  Some source omitted; locations remain available."] : []),
     );
