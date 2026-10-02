@@ -1,6 +1,6 @@
 ---
 name: audit-agents
-description: Audit or rewrite AGENTS.md so it holds only lasting principles.
+description: Audit or rewrite AGENTS.md so it holds only lasting principles. Run it only when the user asks for it by name; never invoke it on your own.
 disable-model-invocation: true
 ---
 
