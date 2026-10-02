@@ -68,6 +68,6 @@ Every parallel checkout is a full copy, and installed dependencies and build out
 
 ## Skills
 
-Skills hold the procedures behind these principles. Load the one that covers your work before you start. Keep them current: when a pass learns a lesson (a gotcha, a pattern that paid off, a rejected approach), add it to the owning skill in the same commit, following [`write-skills`](.agents/skills/write-skills/SKILL.md).
+Skills hold the procedures behind these principles. Load the one that covers your work before you start.
 
 Before changing this file, invoke [`audit-agents`](.agents/skills/audit-agents/SKILL.md).
