@@ -1,6 +1,7 @@
 ---
 name: audit-agents
-description: Audit or rewrite AGENTS.md so it holds only lasting principles. Use when writing or revising contributor guidance, when it has picked up commands, paths, status or session history, or when its rules slow the feedback loop.
+description: Audit or rewrite AGENTS.md so it holds only lasting principles.
+disable-model-invocation: true
 ---
 
 # Audit Agents
