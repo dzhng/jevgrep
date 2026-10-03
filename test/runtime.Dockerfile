@@ -1,7 +1,7 @@
 ARG PACKAGE_STAGE=builder
-FROM oven/bun:1.3.14 AS bun
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS bun
 
-FROM node:22-bookworm-slim AS builder
+FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS builder
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /checkout
 COPY package.json bun.lock turbo.json ./
@@ -27,12 +27,12 @@ COPY .package-input/canonical-skill.md /artifacts/canonical-skill.md
 
 FROM ${PACKAGE_STAGE} AS package
 
-FROM node:22-bookworm-slim AS install
+FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS install
 COPY --from=package /artifacts/jevgrep.tgz /tmp/jevgrep.tgz
 RUN npm install --global --prefix /opt/jevgrep --ignore-scripts --omit=dev /tmp/jevgrep.tgz \
     && rm -rf /tmp/jevgrep.tgz /root/.npm
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS runtime
 COPY --from=install /opt/jevgrep /opt/jevgrep
 COPY --from=package /artifacts/canonical-skill.md /test/canonical-skill.md
 COPY test/installed.test.mjs /test/installed.test.mjs
