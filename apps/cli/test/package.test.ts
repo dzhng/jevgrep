@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { testInDocker } from "./cli";
+import { posix, testInDocker } from "./cli";
 
 const execute = promisify(execFile);
 
@@ -24,15 +24,26 @@ testInDocker(
       NODE_PATH: "",
       npm_config_cache: npmCache,
     };
-    try {
-      const { stdout } = await execute(
-        "npm",
-        ["pack", "--ignore-scripts", "--json", "--pack-destination", scratch],
+    // npm.cmd needs cmd.exe; all arguments here are fixed options or fixture paths.
+    const npm = (args: string[]) =>
+      execute(
+        posix ? "npm" : "cmd.exe",
+        posix ? args : ["/d", "/s", "/c", `npm ${args.map((arg) => `"${arg}"`).join(" ")}`],
         {
           cwd: fileURLToPath(new URL("../", import.meta.url)),
           env,
+          timeout: 120000,
+          windowsVerbatimArguments: !posix,
         },
       );
+    try {
+      const { stdout } = await npm([
+        "pack",
+        "--ignore-scripts",
+        "--json",
+        "--pack-destination",
+        scratch,
+      ]);
       const packed = JSON.parse(stdout)[0];
       const filenames = packed.files.map((file: { path: string }) => file.path);
       expect(filenames).toContain("dist/bin/index.js");
@@ -45,21 +56,17 @@ testInDocker(
         false,
       );
       const prefix = join(scratch, "install");
-      await execute(
-        "npm",
-        [
-          "install",
-          "--prefix",
-          prefix,
-          "--ignore-scripts",
-          "--no-audit",
-          "--no-fund",
-          join(scratch, packed.filename),
-        ],
-        { cwd: scratch, env, timeout: 120000 },
-      );
-      const binary = join(prefix, "node_modules/.bin/jg");
-      const help = await execute(binary, ["--help"], { cwd: scratch, env });
+      await npm([
+        "install",
+        "--prefix",
+        prefix,
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        join(scratch, packed.filename),
+      ]);
+      const binary = join(prefix, "node_modules/@dzhng/jevgrep/dist/bin/index.js");
+      const help = await execute("node", [binary, "--help"], { cwd: scratch, env });
       expect(help.stderr).toBe("");
       expect(help.stdout).toContain('Usage: jg "question" [root]');
       expect(

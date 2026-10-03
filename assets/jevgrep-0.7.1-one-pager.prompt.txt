@@ -1,0 +1,57 @@
+Tool: built-in image_gen
+Output: jevgrep-0.7.1-one-pager.png
+
+Initial generation prompt
+
+Create ONE beautiful, finished 16:9 landscape presentation slide as a high-resolution raster image for the developer CLI product Jevgrep. It summarizes the new capabilities between 0.5 and 0.7.1. This is a product release one-pager, suitable for sharing, not a screenshot of a slideshow app.
+
+ART DIRECTION: refined editorial technology design, warm ivory paper background, near-black ink, restrained vermilion red accents. Oversized elegant serif headline, excellent crisp readable typography, clean monospaced commands. Generous whitespace and sophisticated grid. Subtle paper grain and delicate shadows, strong hierarchy, no gradients or glossy generic dashboard styling. Inspired by a beautifully typeset independent magazine meets a premium software launch poster.
+
+COMPOSITION: top left small lowercase wordmark "jevgrep", top right small outlined capsule "0.7.1". Small kicker "WHAT'S NEW SINCE 0.5". Large headline "More languages. More control." Under the headline, a compelling central illustration of an ivory paper repository tree: file sheets labelled Python, TS / JS, Go, Rust. Go and Rust are highlighted in vermilion. Selected branches lead into precise highlighted code excerpt strips. An unwanted branch gracefully fades out with a small exclusion mark. Make this illustration artful but schematic and clear, with no meaningless complex code. Balance the hero illustration with an organized, airy feature grid using fine rules and integrated little editorial illustrations, not bulky rounded cards.
+
+EXACT FEATURE TEXT, each title paired with one short readable line:
+"Go + Rust"
+"Named functions, types and methods"
+"Inspect the scope"
+"jg files"
+"Choose what gets read"
+"--exclude"
+"Your own gateway"
+"Custom TypeSafe-compatible endpoints"
+"Keep searches controlled"
+"Request limits. Clear partial results."
+"Python, lighter"
+"Tree-sitter replaces embedded Python"
+
+Use these six short feature blocks in a coherent grid around or beneath the central illustration. Commands jg files and --exclude must be rendered exactly in monospaced type. The headline and feature titles should dominate, supporting text still comfortably legible at slide scale. Lower edge: modest elegant install line "npm install -g @dzhng/jevgrep". Include no other text.
+
+ACCURACY: this is named declaration retrieval for Go/Rust, not full compiler or macro support. Custom gateways must say TypeSafe-compatible. Do not invent speed metrics, percentage savings, benchmarks, stars, endorsements, certifications, dashboards or logos. No fine print. No watermark. No slide border, device frame or surrounding desk. Entire image is the slide.
+
+Final edit prompt
+
+Edit this finished Jevgrep slide with exactly two corrections. Preserve the complete composition, all typography, layout, colors, feature blocks, paper textures, illustrations and all other text exactly.
+
+1. The two grey circled X marks after the Python and TS / JS source examples incorrectly suggest those languages are unsupported. Replace both X marks with grey circled checkmarks. Keep Python and TS / JS subdued grey as existing supported languages; Go and Rust remain the vermilion new additions. Do not cross out or exclude any language.
+
+2. Correct the Rust snippet to syntactically valid illustrative code. Within the same Rust source strip, show exactly these four lines in monospace:
+impl Index {
+    pub fn search(&self, query: &str) {
+        ...
+    }
+}
+The ellipsis is illustrative omitted source, and braces must be balanced.
+
+No other changes. Return the full landscape slide, same aspect ratio and framing.
+
+
+Version announcement refinement prompt
+
+Edit this Jevgrep one-page slide into a clear VERSION ANNOUNCEMENT for release 0.7.1.
+
+Change the top header area only. The main headline must read exactly "jevgrep 0.7.1" and be the largest, most visually dominant text on the entire slide. Use the same elegant heavy serif style. Set "jevgrep" in near-black and "0.7.1" in vivid vermilion, with the version equally large as the product name. A viewer must immediately notice and remember 0.7.1. Keep this as one beautiful oversized headline.
+
+Immediately underneath, put the smaller but still prominent subtitle exactly "More languages. More control." Use approximately one-third the headline's size, so it supports the version announcement.
+
+Remove the old small top-left jevgrep wordmark, the old small top-right version pill, and the kicker "WHAT'S NEW SINCE 0.5". Instead include only a modest small uppercase kicker "NEW RELEASE" above the main headline. This is a 0.7.1 announcement, not a retrospective comparison.
+
+Preserve the warm ivory paper background, ink and vermilion palette, artwork, six feature blocks, file-tree diagram, Python and TS/JS checkmarks, correct Go/Rust illustrative excerpts, install command, readable typography, clean alignment and generous margins. Maintain the full 16:9 landscape slide and strong editorial design. Reflow the header gracefully so the subtitle is not crowded or overlapping the diagram; a small proportional adjustment to the illustration's vertical position is allowed to fit the new title hierarchy. Keep all existing feature text unchanged. Do not add other text or claims. No watermark.

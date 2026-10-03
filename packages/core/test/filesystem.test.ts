@@ -1,4 +1,4 @@
-import { testIfDocker as test } from "../../../test/helpers/docker";
+import { posix, testIfDocker as test } from "../../../test/helpers/docker";
 import { afterEach, expect, spyOn } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm, symlink, chmod, open, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -86,7 +86,7 @@ test("pages advance past excluded entries, preserve unusual names, and release c
     skip1: "excluded",
     skip2: "excluded",
     "a.ts": "a",
-    "line\nbreak.ts": "b",
+    ...(posix ? { "line\nbreak.ts": "b" } : {}),
     "last.ts": "c",
   });
   const reader = await createFilesystem({ root, limits: { pageSize: 1, maxOpenDirectories: 1 } });
@@ -99,7 +99,7 @@ test("pages advance past excluded entries, preserve unusual names, and release c
       names.push(...page.entries.map((entry) => entry.path));
       cursor = page.nextCursor;
     } while (cursor);
-    expect(names.sort()).toEqual(["a.ts", "last.ts", "line\nbreak.ts"]);
+    expect(names.sort()).toEqual(["a.ts", "last.ts", ...(posix ? ["line\nbreak.ts"] : [])]);
     expect((await reader.listPage()).issues).toEqual([]);
   } finally {
     await reader.close();
@@ -221,25 +221,29 @@ test("exclude patterns only narrow eligibility, even with --no-ignore and reposi
 test("root normalization does not follow descendant links or special files and permission errors stay issues", async () => {
   const root = await fixture({ visible: "ok", unreadable: "unreadable sentinel" });
   const outside = await fixture({ outside: "OUTSIDE_SENTINEL" });
-  await symlink(outside, join(root, "escape"));
-  await symlink(root, join(root, "cycle"));
-  await chmod(join(root, "unreadable"), 0);
-  const fifo = Bun.spawnSync(["mkfifo", join(root, "pipe")]);
-  expect(fifo.exitCode).toBe(0);
+  // POSIX ignores the type; Windows junctions need no symlink privilege.
+  await symlink(outside, join(root, "escape"), "junction");
+  await symlink(root, join(root, "cycle"), "junction");
+  if (posix) {
+    await chmod(join(root, "unreadable"), 0);
+    const fifo = Bun.spawnSync(["mkfifo", join(root, "pipe")]);
+    expect(fifo.exitCode).toBe(0);
+  }
   const reader = await createFilesystem({ root });
   try {
     for (const path of [
       "escape/outside",
       "cycle/visible",
-      "pipe",
+      ...(posix ? ["pipe"] : []),
       "../outside",
       join(outside, "outside"),
     ])
       expect(await reader.readSnapshot(path)).toMatchObject({ status: "excluded" });
-    expect(await reader.readSnapshot("unreadable")).toMatchObject({
-      status: "issue",
-      issue: { kind: "unreadable" },
-    });
+    if (posix)
+      expect(await reader.readSnapshot("unreadable")).toMatchObject({
+        status: "issue",
+        issue: { kind: "unreadable" },
+      });
     expect(await reader.readSnapshot("visible")).toMatchObject({ status: "ok" });
   } finally {
     await reader.close();
@@ -378,7 +382,7 @@ test("one reader observes same-size ignore edits with restored timestamps and re
 test("protected storage remains excluded when explicit root resolves through its alias", async () => {
   const store = await fixture({ credential: "NEVER_UPLOAD" });
   const root = await fixture({});
-  await symlink(store, join(root, "alias"));
+  await symlink(store, join(root, "alias"), "junction");
   const reader = await createFilesystem({
     root: store,
     protectedPaths: [join(root, "alias")],

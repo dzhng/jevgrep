@@ -51,8 +51,13 @@ def baseline_prompt(row):
     return common + 'The entire task, including verification, has a 900-second deadline. ' + VERIFICATION + '\n\n' + row['problem_statement']
 
 
+REQUIRED_RETRIEVAL = ('Before investigating the implementation, run one natural-language jg search '
+                      'about the requested behavior and its tests. jg files is only inventory '
+                      'and does not satisfy this requirement.\n\n')
+
+
 def treatment_prompt(row):
-    return '$jevgrep\n\n' + baseline_prompt(row).replace(
+    return '$jevgrep\n\n' + REQUIRED_RETRIEVAL + baseline_prompt(row).replace(
         'The entire task, including verification, has a 900-second deadline. ', TREATMENT_TIMING, 1)
 
 
@@ -283,6 +288,28 @@ def existing_attempt(plan):
     return True
 
 
+def required_jg_search(executions):
+    for execution in executions:
+        try:
+            argv = shlex.split(execution)
+            if len(argv) == 3 and argv[0] in ('/bin/sh', '/bin/bash', 'sh', 'bash') and argv[1] in ('-c', '-lc'):
+                execution = argv[2]
+            lexer = shlex.shlex(execution, posix=True, punctuation_chars=';&|<>()\n')
+            lexer.whitespace = ' \t\r'
+            lexer.whitespace_split, lexer.commenters = True, ''
+            segment = []
+            for token in [*lexer, ';']:
+                if re.fullmatch(r'[;&|<>()\n]+', token):
+                    if direct_jg_search(shlex.join(segment)):
+                        return True
+                    segment = []
+                else:
+                    segment.append(token)
+        except ValueError:
+            continue
+    return False
+
+
 def direct_jg_search(command):
     """Recognize a standalone invocation, never a shell program that also runs jg."""
     try:
@@ -313,11 +340,11 @@ def direct_jg_search(command):
                 options = False
             elif options and arg in ('--no-cache', '--hidden', '--no-ignore', '--include-dependencies', '--include-sensitive'):
                 pass
-            elif options and arg == '--max-source-bytes':
+            elif options and arg in ('--max-source-bytes', '--max-requests', '--max-output-bytes', '--concurrency'):
                 index += 1
                 if index >= len(argv) or not argv[index].isdigit():
                     return False
-            elif options and arg.startswith('--max-source-bytes='):
+            elif options and any(arg.startswith(flag+'=') for flag in ('--max-source-bytes', '--max-requests', '--max-output-bytes', '--concurrency')):
                 if not arg.split('=', 1)[1].isdigit():
                     return False
             elif options and arg == '--exclude':
@@ -535,7 +562,7 @@ def run(args):
             except ValueError: pass
         receipt['native_completed'] = any(event.get('type') == 'turn.completed' for event in events)
         executions = [event['item'].get('command', '') for event in events if event.get('type') == 'item.completed' and event.get('item', {}).get('type') == 'command_execution']
-        receipt['required_retrieval_observed'] = any(re.search(r'(?<![A-Za-z0-9_])jg\s+(?!doctor\b|skill\b|auth\b|cache\b|--help\b|--version\b)', execution) for execution in executions)
+        receipt['required_retrieval_observed'] = required_jg_search(executions)
         receipt['usage_events'] = [event for event in events if event.get('type') == 'turn.completed']
         receipt['source_status'] = dx(['git', '-C', '/testbed', 'status', '--porcelain'], 'agent').stdout.decode()
         dx(['git', '-C', '/testbed', 'add', '-A'], 'agent')
@@ -615,7 +642,11 @@ def observed_jev(out, events, log_valid, traces_copied, provider="vercel"):
     ends = [event for event in events if event.get('kind') == 'gateway']
     end_ids = [event.get('requestId') for event in ends]
     safe_end_ids = {identifier for identifier in end_ids if isinstance(identifier, str) and re.fullmatch(r'[a-f0-9]{32}', identifier)}
-    coverage = (log_valid and traces_copied is True and len(safe_ids) == len(ids) and
+    # A local-only command creates no Jev trace directory. Positive agent traffic
+    # establishes that the proxy captured the attempt; an empty log cannot do so.
+    trace_capture = traces_copied is True or (not ids and any(
+        event.get('kind') in ('codex-gateway', 'claude-gateway') for event in events))
+    coverage = (log_valid and trace_capture and len(safe_ids) == len(ids) and
                 safe_ids == set(responses) == set(requests) == safe_end_ids and len(safe_end_ids) == len(ends) == len(ids))
     costs, inputs, outputs, attempts = [], [], [], []
     native_rate = Decimal('0.042') / 1_000_000

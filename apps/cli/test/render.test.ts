@@ -105,10 +105,35 @@ test("large merged excerpts render every source line without argument expansion"
   value.files[0]!.excerpts = [
     { range: { startLine: 1, endLine: 150000 }, source: Array(150000).fill("x").join("\n") },
   ];
-  const output = renderResult(value);
+  const output = renderResult(value, 0, 0);
   expect(output).toContain("\n```\nx\nx\n");
   expect(output).toContain("\nx\n```\n\nDeclaration locations:");
   expect(output.match(/^x$/gm)?.length).toBe(150000);
+});
+
+test("default output ceiling keeps a complete final marker and reports omitted context", () => {
+  const value = result();
+  value.files[0]!.excerpts = [
+    {
+      range: { startLine: 1, endLine: 150001 },
+      source: "```\n" + Array(150000).fill("x").join("\n"),
+    },
+  ];
+  const output = renderResult(value, 0);
+  expect(Buffer.byteLength(output)).toBeLessThanOrEqual(256000);
+  expect(output).toContain("Output truncated at the byte limit");
+  const originalBytes = Buffer.from(renderResult(value, 0, 0));
+  const outputBytes = Buffer.from(output);
+  let retainedBytes = 0;
+  while (
+    retainedBytes < outputBytes.length &&
+    originalBytes[retainedBytes] === outputBytes[retainedBytes]
+  )
+    retainedBytes++;
+  expect(output).toContain(`${originalBytes.length - retainedBytes} original bytes omitted`);
+  expect(output.match(/^````$/gm)).toHaveLength(2);
+  expect(output).toContain("\n````\n\nOutput truncated");
+  expect(output.endsWith("\nEnd context.\n")).toBe(true);
 });
 
 test("control characters in guidance paths cannot forge packet boundaries", () => {

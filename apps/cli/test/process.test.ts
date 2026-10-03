@@ -4,13 +4,13 @@ import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { testInDocker, withCli } from "./cli";
+import { testInDockerPosix, withCli } from "./cli";
 
 const execute = promisify(execFile);
 const cli =
   process.env.JEVGREP_TEST_CLI ?? fileURLToPath(new URL("../dist/bin/index.js", import.meta.url));
 
-testInDocker("a closed stdout pipe exits quietly", async () => {
+testInDockerPosix("a closed stdout pipe exits quietly", async () => {
   await withCli(async ({ home }) => {
     const { stdout } = await execute(
       "python3",
@@ -38,7 +38,7 @@ finally:
   });
 });
 
-testInDocker("interactive auth hides input and exits 130 on interruption", async () => {
+testInDockerPosix("interactive auth hides input and exits 130 on interruption", async () => {
   await withCli(async ({ home }) => {
     for (const mode of [
       "save",

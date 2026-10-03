@@ -13,6 +13,9 @@ import type { Evaluator, FileEvidence, ReadingLead, EvidenceRange } from "./type
 import type { Snapshot } from "./filesystem";
 type Span = { start: number; end: number };
 const sourceUnitBytes = 24_000;
+export const wholeFileContextBytes = 16_000;
+export const sourceBatchSize = 128;
+export const sourceConfidenceBoundary = 0.7;
 export type SelectionResult = {
   file: FileEvidence;
   declarations: Array<Pick<SourceUnit, "name" | "range">>;
@@ -146,7 +149,7 @@ export async function selectFile(
   for (const unit of units) {
     if (
       pending.length &&
-      (pending.length >= 128 ||
+      (pending.length >= sourceBatchSize ||
         Buffer.byteLength(
           lines.slice(pending[0]!.range.startLine - 1, unit.range.endLine).join("\n"),
         ) > 42000)
@@ -184,7 +187,7 @@ export async function selectFile(
                   `Source lines ${unit.range.startLine}-${unit.range.endLine}; source bytes ${unit.sourceByteStart}-${unit.sourceByteEnd}:\n${sourceForUnit(snapshot, unit)}`,
               )
               .join("\n")
-          : bytes.length <= 16000
+          : bytes.length <= wholeFileContextBytes
             ? snapshot.source
             : `Opening context:\n${lines.slice(0, 20).join("\n")}\nSource lines ${first}-${last}:\n${lines.slice(first - 1, last).join("\n")}`;
       const request = evidenceRequest(
@@ -357,7 +360,7 @@ export async function selectFile(
   // Presentation can be stricter without narrowing evidence sent to Jev.
   const displayed = mergeSpans(
     [...sourceDecisions.values()]
-      .filter((decision) => decision.score > 0.7)
+      .filter((decision) => decision.score > sourceConfidenceBoundary)
       .map((decision) => spanForRange(decision.range))
       .flatMap((span) =>
         chosen.flatMap((selectedSpan) => {

@@ -10,8 +10,11 @@ Preparation installs the packed npm artifact and dependencies once, then checks
 that same installation offline in every selected runtime image. Each check
 verifies the original source, agent versions and canonical packaged skill.
 The coding agent receives the archived prefix and runs the real `jg` executable
-on an internal network. The benchmark prompt explicitly invokes `$jevgrep`, as required for the retrieval comparison;
-the public skill itself teaches CLI usage without prescribing a research workflow. Retrieval limits come
+on an internal network. The benchmark prompt explicitly invokes `$jevgrep` and
+requires a natural-language search before implementation discovery. An inventory
+command does not satisfy that requirement. Prompt changes require a new frozen
+baseline protocol; historical plans retain their archived runner.
+The public skill itself teaches CLI usage without prescribing a research workflow. Retrieval limits come
 from the frozen package's default policy.
 
 New preparations use the current canonical `skills/jevgrep/SKILL.md` by default
@@ -74,7 +77,8 @@ transport receipts, request/response files and valid cost fields. Missing or
 invalid evidence leaves the total unknown while preserving a known subtotal.
 Retained response costs still contribute to that subtotal when the transport log
 or a request-start entry is missing.
-These observations never enter the scored Sol task cost or change cost-win rules.
+Jev charges contribute to total task cost; they remain separate from the Sol
+component and its token counts.
 
 `aggregate --plan ...` reports official solves, protocol validity and billing for
 the selected tasks. It does not issue a promotion verdict. Unknown costs prevent

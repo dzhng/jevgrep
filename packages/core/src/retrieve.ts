@@ -10,7 +10,13 @@ import {
   type NavigationItem,
   type Evidence,
 } from "./requests";
-import { selectFile, type SelectionResult } from "./selection";
+import {
+  selectFile,
+  wholeFileContextBytes,
+  sourceBatchSize,
+  sourceConfidenceBoundary,
+  type SelectionResult,
+} from "./selection";
 import { localCallContext } from "./call-context";
 import { selectTestBodies } from "./test-body-selection";
 import { repositoryContext } from "./repository-context";
@@ -18,6 +24,25 @@ import type { Evaluator, FileEvidence, RetrievalResult, SearchInput } from "./ty
 
 // Bound per-stage source work; the evaluator separately caps shared provider attempts.
 const stageWorkers = 32;
+const relevanceBoundary = 0.5;
+const weakScoreCeiling = 0.6;
+const minimumPositiveScores = 32;
+export const navigationByteBudget = 8_000_000;
+function navigationAdmissions<T extends { score: number }>(
+  classified: T[],
+  hasStrongEvidence: boolean,
+) {
+  const suppressWeak =
+    !hasStrongEvidence &&
+    classified.filter(({ score }) => score > relevanceBoundary && score < weakScoreCeiling)
+      .length >= minimumPositiveScores;
+  return {
+    admitted: classified.filter(
+      ({ score }) => score >= weakScoreCeiling || (!suppressWeak && score > relevanceBoundary),
+    ),
+    suppressWeak,
+  };
+}
 /** Traversal owns admission; every stage reads through the same eligibility policy. */
 export async function retrieve(input: SearchInput, evaluator: Evaluator): Promise<RetrievalResult> {
   const reader = await createFilesystem({
@@ -60,6 +85,12 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     return evaluator.evaluate(request, { navigation, beforeAttempt });
   }
   let entriesSeen = 0;
+  let navigationBytes = 0;
+  let positiveScoresSeen = 0;
+  let strongScoreSeen = false;
+  let confidentSourceSeen = false;
+  const sourceProbes = new Set<string>();
+  const firstSelections = new Map<string, { contentHash: string; selection: SelectionResult }>();
   let stop = false;
   function issue(kind: string, count = 1, message?: string) {
     if (kind === "provider") providerFailure ??= message;
@@ -100,16 +131,31 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       batch.push(item);
     }
     if (batch.length) batches.push(batch);
+    let budgetPaused = false;
     async function scoreGroup(group: NavigationItem[]) {
       try {
+        const request = navigationRequest(input.query, group, anchor);
+        const requestBytes = Buffer.byteLength(JSON.stringify(request));
+        if (
+          !confidentSourceSeen &&
+          positiveScoresSeen >= minimumPositiveScores &&
+          navigationBytes + requestBytes > navigationByteBudget
+        ) {
+          batches.unshift(group);
+          budgetPaused = true;
+          return;
+        }
+        navigationBytes += requestBytes;
         const sources = group.flatMap((item) => donors.get(item) ?? []);
         if (anchor) sources.push(anchors.get(anchor)!);
-        const scores = await freshEvaluation(
-          navigationRequest(input.query, group, anchor),
-          sources,
-          true,
-        );
-        group.forEach((item, index) => results.push({ item, score: scores[`q${index}`]! }));
+        const scores = await freshEvaluation(request, sources, true);
+        group.forEach((item, index) => {
+          const probability = scores[`q${index}`]!;
+          if (probability >= weakScoreCeiling) strongScoreSeen = true;
+          if (probability > relevanceBoundary) positiveScoresSeen++;
+          results.push({ item, score: probability });
+        });
+        await confirmSource(group.map((item, index) => ({ item, score: scores[`q${index}`]! })));
       } catch (error) {
         if (
           error instanceof EvaluationFailure &&
@@ -128,29 +174,47 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     }
     // Failed groups append their halves to the same queue. A recovered parent is
     // not incomplete; only an exhausted leaf or a terminal failure records an issue.
-    await new Promise<void>((resolve, reject) => {
-      let active = 0;
-      let rejected = false;
-      function pump() {
-        if (rejected) return;
-        while (active < stageWorkers && batches.length && !stop && !input.signal.aborted) {
-          const group = batches.shift()!;
-          active++;
-          scoreGroup(group).then(
-            () => {
-              active--;
-              pump();
-            },
-            (error) => {
-              rejected = true;
-              reject(error);
-            },
-          );
+    // A pending group may still contain a strong match, so finish in-flight work
+    // before reporting that the budget was reached without confident source.
+    while (batches.length && !stop && !input.signal.aborted) {
+      await new Promise<void>((resolve, reject) => {
+        let active = 0;
+        let rejected = false;
+        function pump() {
+          if (rejected) return;
+          while (
+            active < stageWorkers &&
+            batches.length &&
+            !budgetPaused &&
+            !stop &&
+            !input.signal.aborted
+          ) {
+            const group = batches.shift()!;
+            active++;
+            scoreGroup(group).then(
+              () => {
+                active--;
+                pump();
+              },
+              (error) => {
+                rejected = true;
+                reject(error);
+              },
+            );
+          }
+          if (active === 0) resolve();
         }
-        if (active === 0) resolve();
+        pump();
+      });
+      if (stop || input.signal.aborted || !budgetPaused) break;
+      if (!confidentSourceSeen) await confirmSource(results, true);
+      if (stop || input.signal.aborted) break;
+      if (!confidentSourceSeen) {
+        issue("low_confidence_budget");
+        stop = true;
       }
-      pump();
-    });
+      budgetPaused = false;
+    }
     return results;
   }
   async function previewDirectory(path: string): Promise<DirectoryPreview | undefined> {
@@ -398,11 +462,11 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
         }
       }
       classified.push(...(await score(remaining, anchor)));
-      for (const { item, score: probability } of classified) {
+      const { admitted, suppressWeak } = navigationAdmissions(classified, strongScoreSeen);
+      for (const { item, score: probability } of admitted) {
         if (item.kind === "directory") {
-          if (probability > 0.5) directories.push(item.path);
-          else if (!anchor) pruned.set(item.path, item);
-        } else if (probability > 0.5) {
+          directories.push(item.path);
+        } else {
           const prior = candidates.get(item.path);
           if (!prior || probability > prior.score)
             candidates.set(item.path, {
@@ -412,6 +476,13 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
             });
         }
       }
+      for (const { item, score: probability } of classified)
+        if (
+          item.kind === "directory" &&
+          (probability <= relevanceBoundary || (suppressWeak && probability < weakScoreCeiling)) &&
+          !anchor
+        )
+          pruned.set(item.path, item);
     }
     if (directories.length) issue("resource_limit");
   }
@@ -447,6 +518,97 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       });
   }
 
+  async function selectSource(
+    candidate: { path: string; contentHash: string; score: number },
+    source: Snapshot,
+    previous?: FileEvidence,
+    evidence?: () => Promise<Evidence[] | undefined>,
+  ) {
+    if (Buffer.byteLength(source.source) > 1_000_000) {
+      issue("source_inspection_limit");
+      return;
+    }
+    const selection = await selectFile(
+      source,
+      input.query,
+      candidate.score,
+      {
+        get requests() {
+          return evaluator.requests;
+        },
+        evaluate: (request) => {
+          const context = request.state as { selectedEvidence?: Evidence[] };
+          return freshEvaluation(request, [
+            candidate,
+            ...(context.selectedEvidence ?? []).map((entry) => candidates.get(entry.path)!),
+          ]);
+        },
+      },
+      async () => {
+        if (input.signal.aborted) throw new EvaluationFailure("cancelled");
+        const current = await unchanged(candidate);
+        if (input.signal.aborted) throw new EvaluationFailure("cancelled");
+        if (!current) return null;
+        return { evidence: await evidence?.() };
+      },
+      previous,
+      input.signal,
+    );
+    for (const entry of selection.issues)
+      if (entry.kind !== "source-invalid")
+        issue(entry.kind, entry.count, selection.providerFailure);
+    return selection;
+  }
+  async function confirmSource(
+    choices: Array<{ item: NavigationItem; score: number }>,
+    finalProbe = false,
+  ) {
+    if (
+      confidentSourceSeen ||
+      (!finalProbe && sourceProbes.size >= 4) ||
+      stop ||
+      input.signal.aborted
+    )
+      return;
+    const available = choices.flatMap(({ item, score }) =>
+      item.kind === "file"
+        ? [{ ...donors.get(item)!.find((source) => source.path === item.path)!, score }]
+        : [],
+    );
+    if (finalProbe) available.push(...candidates.values());
+    const ordered = finalProbe
+      ? available.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+      : available;
+    const candidate = ordered.find(
+      ({ path, score }) =>
+        previews.get(path)!.sizeBytes <= (finalProbe ? 1_000_000 : wholeFileContextBytes) &&
+        score >= weakScoreCeiling &&
+        !(finalProbe ? firstSelections.has(path) : sourceProbes.has(path)),
+    );
+    if (!candidate) return;
+    sourceProbes.add(candidate.path);
+    const source = await unchanged(candidate);
+    if (
+      !source ||
+      Buffer.byteLength(source.source) > (finalProbe ? 1_000_000 : wholeFileContextBytes)
+    )
+      return;
+    if (!finalProbe) {
+      const syntax = await inspect(source, { signal: input.signal });
+      if (syntax.units.length > sourceBatchSize) return;
+    }
+    const selection = await selectSource(candidate, source);
+    if (!selection) return;
+    firstSelections.set(candidate.path, { contentHash: candidate.contentHash, selection });
+    if (
+      !selection.issues.length &&
+      !selection.file.sourceOmitted &&
+      selection.file.sourceDecisions?.some(({ score }) => score > sourceConfidenceBoundary) &&
+      (await unchanged(candidate))
+    )
+      confidentSourceSeen = true;
+  }
+
   async function parallel<T>(items: T[], work: (item: T) => Promise<void>) {
     let next = 0;
     const results = await Promise.allSettled(
@@ -467,7 +629,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       await discover(["."]);
       let anchor: { path: string; classes: string[] } | undefined;
       for (const candidate of sortedCandidates()) {
-        if (candidate.score <= 0.5 || stop) break;
+        if (candidate.score <= relevanceBoundary || stop) break;
         const source = await unchanged(candidate);
         if (!source) continue;
         const size = Buffer.byteLength(source.source);
@@ -498,62 +660,47 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
           if (stop) break;
           items.push(await withDirectoryContent(item));
         }
-        const seeds = (await score(items, anchor))
-          .filter((decision) => decision.score > 0.5)
-          .map((decision) => decision.item.path);
+        const seeds = navigationAdmissions(
+          await score(items, anchor),
+          strongScoreSeen,
+        ).admitted.map((decision) => decision.item.path);
         await discover(seeds, anchor);
       }
       const ordered = [...candidates.values()];
       // All admitted paths survive even if subsequent source inspection is unavailable.
-      for (const candidate of ordered)
-        files.set(candidate.path, {
-          ...candidate,
-          roles: [],
-          leads: [],
-          selected: [],
-          rendered: [],
-          excerpts: [],
-          sourceOmitted: false,
-        });
+      for (const candidate of ordered) {
+        const prior = firstSelections.get(candidate.path);
+        files.set(
+          candidate.path,
+          prior?.contentHash === candidate.contentHash
+            ? {
+                ...prior.selection.file,
+                score: candidate.score,
+              }
+            : {
+                ...candidate,
+                roles: [],
+                leads: [],
+                selected: [],
+                rendered: [],
+                excerpts: [],
+                sourceOmitted: false,
+              },
+        );
+      }
       const select = async (evidence?: () => Promise<Evidence[] | undefined>) => {
         const selectCandidate = async (candidate: (typeof ordered)[number]) => {
           const source = await unchanged(candidate);
           if (!source) return;
-          if (Buffer.byteLength(source.source) > 1_000_000) {
-            issue("source_inspection_limit");
-            return;
-          }
-          const selection = await selectFile(
-            source,
-            input.query,
-            candidate.score,
-            {
-              get requests() {
-                return evaluator.requests;
-              },
-              evaluate: (request) => {
-                const context = request.state as { selectedEvidence?: Evidence[] };
-                return freshEvaluation(request, [
-                  candidate,
-                  ...(context.selectedEvidence ?? []).map((entry) => candidates.get(entry.path)!),
-                ]);
-              },
-            },
-            async () => {
-              if (input.signal.aborted) throw new EvaluationFailure("cancelled");
-              const current = await unchanged(candidate);
-              if (input.signal.aborted) throw new EvaluationFailure("cancelled");
-              if (!current) return null;
-              return { evidence: await evidence?.() };
-            },
-            files.get(candidate.path),
-            input.signal,
-          );
+          const prior = firstSelections.get(candidate.path);
+          const selection =
+            !evidence && prior?.contentHash === candidate.contentHash
+              ? prior.selection
+              : await selectSource(candidate, source, files.get(candidate.path), evidence);
+          if (!selection) return;
+          selection.file.score = candidate.score;
           files.set(candidate.path, selection.file);
           declarations.set(candidate.path, selection.declarations);
-          for (const entry of selection.issues)
-            if (entry.kind !== "source-invalid")
-              issue(entry.kind, entry.count, selection.providerFailure);
         };
         if (evidence) {
           for (const candidate of ordered) {

@@ -1,6 +1,6 @@
 {
   "name": "@dzhng/jevgrep",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Content-aware source retrieval for coding agents",
   "license": "MIT",
   "repository": {
@@ -16,7 +16,8 @@
   ],
   "os": [
     "darwin",
-    "linux"
+    "linux",
+    "win32"
   ],
   "type": "module",
   "publishConfig": {

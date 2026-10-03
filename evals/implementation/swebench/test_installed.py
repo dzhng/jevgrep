@@ -55,7 +55,7 @@ class InstalledTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(runner.baseline_prompt(row).encode()).hexdigest(), '41c7e3cf7acbc19d0b24ab55e6ea29fe3cdbc2b777549d158488c6c55baaa643')
         prompt = runner.treatment_prompt(row)
         self.assertTrue(prompt.startswith('$jevgrep\n\n'))
-        self.assertEqual(prompt, '$jevgrep\n\n' + runner.baseline_prompt(row).replace(
+        self.assertEqual(prompt, '$jevgrep\n\n' + runner.REQUIRED_RETRIEVAL + runner.baseline_prompt(row).replace(
             'The entire task, including verification, has a 900-second deadline. ', runner.TREATMENT_TIMING, 1))
         self.assertTrue(prompt.endswith(runner.VERIFICATION + '\n\nFix behavior.'))
 
@@ -158,6 +158,14 @@ class InstalledTests(unittest.TestCase):
                         'jg "$(sleep 5)"', 'env KEY=value jg "query"', 'echo jg "query"', 'jg "query" &', 'jg doc*', 'jg auth?', 'jg {auth,doctor}',
                         'jg "query"\nsleep 5']:
             with self.subTest(command=command): self.assertFalse(runner.direct_jg_search(command))
+
+    def test_inventory_and_setup_commands_do_not_satisfy_required_retrieval(self):
+        executions=['command -v jg && jg files .', 'jg doctor', 'jg --version']
+        self.assertFalse(runner.required_jg_search(executions))
+        self.assertFalse(runner.required_jg_search(['echo jg "How does collection work?"']))
+        self.assertTrue(runner.required_jg_search(executions+['/bin/sh -lc \'jg "How does collection work?" .\'']))
+        self.assertTrue(runner.required_jg_search(['command -v jg && jg "How does collection work?" . --max-requests 1000 --max-output-bytes=256000']))
+        self.assertTrue(runner.required_jg_search(['command -v jg\njg "How does collection work?" .']))
 
     def test_timing_policy_drift_and_legacy_schema_require_their_archived_runner(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -377,6 +385,21 @@ class InstalledTests(unittest.TestCase):
             self.assertEqual(result['client_calls'],2);self.assertEqual(result['provider_attempts'],3)
             self.assertEqual(result['input_tokens'],20);self.assertEqual(result['output_tokens'],4)
             self.assertTrue(result['included_in_scored_task_cost'])
+
+    def test_local_only_commands_have_zero_jev_cost_when_proxy_capture_is_present(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            events=[{'kind':'codex-gateway','status':200}]
+            result=runner.observed_jev(root,events,True,False)
+            self.assertTrue(result['complete'])
+            self.assertEqual(result['observed_cost_usd'],0)
+            self.assertEqual(result['input_tokens'],0)
+            self.assertEqual(result['output_tokens'],0)
+            for traffic,log_valid in [([],True),(events,False),
+                    (events+[{'kind':'jev-request-start','requestId':'0'*32}],True)]:
+                unknown=runner.observed_jev(root,traffic,log_valid,False)
+                self.assertFalse(unknown['complete'])
+                self.assertIsNone(unknown['observed_cost_usd'])
 
     def test_jev_missing_invalid_or_unfinished_responses_leave_total_unknown(self):
         with tempfile.TemporaryDirectory() as temporary:

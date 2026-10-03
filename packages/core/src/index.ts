@@ -1,4 +1,4 @@
-export { retrieve } from "./retrieve";
+export { retrieve, navigationByteBudget } from "./retrieve";
 export { createEvaluator, EvaluationFailure } from "./evaluator";
 export { createEvaluationCache } from "./cache";
 export { inventory } from "./inventory";

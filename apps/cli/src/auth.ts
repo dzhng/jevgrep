@@ -1,5 +1,4 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { isCancel, password, select, text } from "@clack/prompts";
@@ -17,11 +16,8 @@ import {
   type CredentialProvider,
   type ProviderId,
 } from "@repo/core/providers";
+import { storageDirectory } from "@repo/core/storage";
 import { CliError } from "./errors";
-
-export function configDirectory() {
-  return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "jevgrep");
-}
 
 function validateKey(raw: string): string {
   const key = raw.trim();
@@ -134,7 +130,7 @@ async function promptGateway(signal: AbortSignal): Promise<string> {
 }
 
 async function save(credentials: Credentials, signal: AbortSignal) {
-  const directory = configDirectory();
+  const directory = storageDirectory("config");
   signal.throwIfAborted();
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700);
@@ -219,7 +215,7 @@ export async function authenticate(options: AuthOptions, signal: AbortSignal) {
 export async function loadCredentials(): Promise<Credentials> {
   try {
     const credentials = JSON.parse(
-      await readFile(join(configDirectory(), "credentials.json"), "utf8"),
+      await readFile(join(storageDirectory("config"), "credentials.json"), "utf8"),
     );
     if (typeof credentials.apiKey !== "string" || !credentials.apiKey.trim()) {
       throw new CliError("Invalid credentials. Run jg auth again.");

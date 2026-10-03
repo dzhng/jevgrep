@@ -96,8 +96,8 @@ export function navigationRequest(
       {
         type: "boolean" as const,
         instructions:
-          item.kind === "directory" && relationAnchor !== undefined
-            ? `Do the supplied content samples in this directory show a concrete code relationship to a class named in relationAnchor.classes: declaring it, subclassing it, overriding its methods, or directly using it? Judge the source relationship, even if the query names a different platform. Similar concepts or naming without an actual code relationship do not count.`
+          relationAnchor !== undefined && !item.sourceRange
+            ? `For state.items[${i}] (${JSON.stringify(item.path)}), does the provided source in this item alone show a concrete code relationship to a class named in relationAnchor.classes: declaring it, subclassing it, overriding its methods, or directly using it? Judge the source relationship, even if the query names a different platform. Similar concepts or naming without an actual code relationship do not count. Source in other items does not establish a relationship for this item.`
             : item.kind === "directory"
               ? `Is directory ${JSON.stringify(item.path)} worth exploring for this query? Use childPreview filenames and sample metadata as evidence. A truncated preview is not proof useful descendants are absent. This judges navigation potential, not all descendants.`
               : item.sourceRange

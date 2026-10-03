@@ -17,12 +17,24 @@ test("search accepts independent policy flags and a dash-prefixed root after --"
     query: "find behavior",
     root: "-tree",
     noCache: true,
+    maxRequests: 1000,
     maxSourceBytes: 12,
+    maxOutputBytes: 256000,
     policy: { hidden: true },
   });
   expect(() => parseCommand(["question", "a", "b"])).toThrow();
   expect(() => parseCommand(["question", "--max-source-bytes", "-1"])).toThrow();
   expect(() => parseCommand(["question", "--secret-mistake"])).toThrow("Unknown option");
+});
+
+test("request and output ceilings accept explicit bounds", () => {
+  expect(
+    parseCommand(["question", "--max-requests", "12", "--max-output-bytes", "512"]),
+  ).toMatchObject({ maxRequests: 12, maxOutputBytes: 512 });
+  for (const value of ["0", "-1", "1.5", "NaN"])
+    expect(() => parseCommand(["question", "--max-requests", value])).toThrow();
+  for (const value of ["", "1", "255", "-1", "1.5"])
+    expect(() => parseCommand(["question", "--max-output-bytes", value])).toThrow();
 });
 
 test("source allocation is independent of the filesystem policy used for retrieval and cache identity", () => {

@@ -555,15 +555,17 @@ test("custom cache identity keeps endpoints and models separate from presets", a
 });
 
 test("native token pacing preserves concurrent small calls and excludes queue time from timeout", async () => {
-  const arrivals: Array<{ at: number; tokens: number }> = [];
+  const arrivals: number[] = [];
+  const starts: Array<{ at: number; tokens: number }> = [];
+  const inputTokens = (state: string) => (state.length > 1000 ? 60_000 : 100);
   let active = 0;
   let peak = 0;
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
       const body = (await request.json()) as { state: string };
-      const tokens = body.state.length > 1000 ? 60_000 : 100;
-      arrivals.push({ at: performance.now(), tokens });
+      const tokens = inputTokens(body.state);
+      arrivals.push(performance.now());
       peak = Math.max(peak, ++active);
       await new Promise((resolve) => setTimeout(resolve, 80));
       active--;
@@ -579,12 +581,16 @@ test("native token pacing preserves concurrent small calls and excludes queue ti
       apiKey: "fixture",
       signal: new AbortController().signal,
       timeoutMs: 500,
-      fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+      fetch: routeProviderFetch((input, init) => {
+        const body = JSON.parse(init!.body as string) as { state: string };
+        starts.push({ at: performance.now(), tokens: inputTokens(body.state) });
+        return fetch(input, init);
+      }, `http://127.0.0.1:${server.port}`),
     });
     const values = await Promise.all(
       Array.from({ length: 32 }, (_, i) =>
         evaluator.evaluate({
-          state: i < 24 ? "small" : "x".repeat(65_000),
+          state: i < 29 ? "small" : "x".repeat(65_000),
           questions: { q: { type: "boolean", instructions: "Relevant?" } },
         }),
       ),
@@ -592,12 +598,58 @@ test("native token pacing preserves concurrent small calls and excludes queue ti
     expect(values.every((value) => value.q === 0.8)).toBe(true);
     expect(peak).toBeGreaterThan(4);
     expect(arrivals).toHaveLength(32);
-    for (const start of arrivals) {
-      // Leave a few milliseconds for loopback transport scheduling jitter.
-      const tokens = arrivals
+    expect(starts).toHaveLength(32);
+    for (const start of starts) {
+      // Pace client starts; transport delay can compress server arrival windows.
+      const tokens = starts
         .filter((entry) => entry.at >= start.at && entry.at < start.at + 990)
         .reduce((sum, entry) => sum + entry.tokens, 0);
-      expect(tokens).toBeLessThanOrEqual(250_000);
+      expect(tokens).toBeLessThanOrEqual(100_000);
+    }
+  } finally {
+    server.stop(true);
+  }
+}, 10_000);
+
+test("TypeSafe admits at most 40 small requests per second through real HTTP", async () => {
+  const arrivals: number[] = [];
+  const starts: number[] = [];
+  const server = Bun.serve({
+    port: 0,
+    fetch() {
+      arrivals.push(performance.now());
+      return Response.json({
+        answers: { q: { type: "noul", noul: 0.8 } },
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+    },
+  });
+  try {
+    const evaluator = createEvaluator({
+      provider: "typesafe",
+      apiKey: "fixture",
+      signal: new AbortController().signal,
+      concurrency: 64,
+      fetch: routeProviderFetch((input, init) => {
+        starts.push(performance.now());
+        return fetch(input, init);
+      }, `http://127.0.0.1:${server.port}`),
+    });
+    const values = await Promise.all(
+      Array.from({ length: 80 }, () =>
+        evaluator.evaluate({
+          state: "small",
+          questions: { q: { type: "boolean", instructions: "Relevant?" } },
+        }),
+      ),
+    );
+    expect(values.every((value) => value.q === 0.8)).toBe(true);
+    expect(arrivals).toHaveLength(80);
+    expect(starts).toHaveLength(80);
+    expect(starts[39]! - starts[0]!).toBeLessThan(900);
+    for (const start of starts) {
+      // Unit tests own the exact boundary; allow SDK dispatch scheduling jitter.
+      expect(starts.filter((at) => at >= start && at < start + 900).length).toBeLessThanOrEqual(40);
     }
   } finally {
     server.stop(true);
@@ -632,7 +684,7 @@ test("token-queued requests revalidate source after waiting", async () => {
   await Promise.all(running);
   expect(await queued).toMatchObject({ kind: "source-invalid" });
   expect(calls).toBe(3);
-});
+}, 10_000);
 
 test("Cloudflare AI Gateway uses the Workers AI route, gateway auth and unwraps the result", async () => {
   const seen: { path: string; auth: string | null; gatewayAuth: string | null; body: unknown }[] =

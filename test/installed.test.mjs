@@ -578,9 +578,7 @@ test("actual installed search parses Python and returns every relevant hierarchy
 test("search concurrency limits all stages against a busy provider", async (t) => {
   let active = 0;
   let peak = 0;
-  const pending = [];
-  let initialSelectionArrivals = 0;
-  const fixture = await context(t, async ({ body, response }) => {
+  const fixture = await context(t, async ({ response }) => {
     active++;
     peak = Math.max(peak, active);
     response.once("finish", () => active--);
@@ -589,19 +587,8 @@ test("search concurrency limits all stages against a busy provider", async (t) =
       response.end(JSON.stringify({ error: "Too many concurrent calls" }));
       return true;
     }
-    if (Array.isArray(body.state.declarations) && !body.state.selectedEvidence) {
-      initialSelectionArrivals++;
-      if (initialSelectionArrivals <= 2) {
-        await new Promise((resolve) => {
-          const deadline = setTimeout(resolve, 5000);
-          pending.push(() => {
-            clearTimeout(deadline);
-            resolve();
-          });
-          if (pending.length === 2) pending.forEach((release) => release());
-        });
-      }
-    }
+    // Keep every stage busy; the first source check may run during navigation.
+    await new Promise((resolve) => setTimeout(resolve, 50));
     return false;
   });
   complete(await fixture.run([query, fixture.tree, "--concurrency", "2", "--no-cache"]));

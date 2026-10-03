@@ -10,6 +10,9 @@ refactor or config change that preserves it. Most bad tests fail the opposite
 way: red on harmless changes, green while the real path is broken. Every rule
 below serves that one goal.
 
+For deciding whether coverage adds independent proof, where it belongs, or
+which existing tests can go, use [audit-tests](../audit-tests/SKILL.md).
+
 ## Workflow: tracer bullets, not a batch
 
 1. **Write ONE test at a time.** Assert first, watch it go red on the un-fixed

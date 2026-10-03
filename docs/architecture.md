@@ -8,12 +8,23 @@ is data, never instructions.
 
 Hierarchical traversal uses directory metadata and content previews to decide where
 to explore. It does not upload the entire tree first. Keep files that pass relevance
-criteria without a fixed top-N limit. Unread descendants and failed classifications
-remain unknown; partial discovery must be reported honestly. A healthy negative file
-preview does not trigger an exhaustive scan of unseen source. This limits upload
-cost but can miss relevant code later in a file. Completion means the planned
-search finished, not that every relevant byte was found. Oversized preview requests
-are split into bounded source chunks.
+criteria without a fixed top-N limit. Weak positive navigation floods without
+strong evidence are suppressed. Navigation estimates alone do not justify an
+unbounded search: a navigation byte budget applies until source selection has
+confirmed useful code. A bounded early source pass reuses the same judgments in
+later selection. Reaching the budget reports incomplete discovery so the caller
+can narrow the root. [Retrieval](../packages/core/src/retrieve.ts) owns this boundary. Unread
+descendants and failed classifications remain unknown; partial discovery must be
+reported honestly. A healthy negative file preview does not trigger an exhaustive
+scan of unseen source. This limits upload cost but can miss relevant code later
+in a file. Completion means the planned search finished, not that every relevant
+byte was found. Oversized preview requests are split into bounded source chunks.
+
+A relationship pass can recover implementations of the same class contract across
+platforms. Directory samples and whole-file previews use the same relationship
+criterion, bound to each item's own source. One matching sibling must not make
+unrelated previews positive. Source-range and declaration judgments still assess
+the query itself; a relationship lead does not guarantee relevant implementation.
 
 Source relevance and scope are separate judgments. The current implementation
 counts even when it contains the bug. Contextual follow-up can recover concretely
@@ -59,6 +70,9 @@ Stdout begins with status and a compact file summary, then verbatim source block
 then detailed declaration and call locations. Useful source should be visible early.
 Paths without excerpts remain optional reading leads, not a compulsory checklist.
 No separate report file or negative-path inventory is required.
+The CLI bounds provider attempts and total stdout independently of source
+allocation. Reaching a search budget reports partial discovery; reaching the
+output ceiling marks omitted context and preserves a complete final marker.
 
 Reading priority depends on the query, ancestor folders and content preview.
 Folder names are clues rather than hard exclusions: specs may lead for design

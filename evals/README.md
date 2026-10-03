@@ -43,3 +43,7 @@ skills on identical CLI builds, separately from automatic-trigger checks.
 
 The [Python parser checkpoint](results/python-parser-checkpoint-2026-09-29.md)
 records one official task against the merged Tree-sitter runtime.
+
+The [bounded-search research](results/issue-41-bounded-search-2026-09-29.md)
+records weak-score experiments, cost accounting repairs, and the protocol audit
+that distinguishes an inventory command from the required search.

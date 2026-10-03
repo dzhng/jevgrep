@@ -4,9 +4,10 @@ import { expect } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { testIfDocker } from "./helpers/docker";
+import { testIfDocker, testIfDockerPosix } from "./helpers/docker";
 import { retrieve } from "../packages/core/src/retrieve";
 import { createEvaluator, EvaluationFailure } from "../packages/core/src/evaluator";
+import { renderResult } from "../apps/cli/src/render";
 
 type Body = {
   state: {
@@ -17,6 +18,340 @@ type Body = {
   questions: Record<string, unknown>;
 };
 const query = "Find Anchor implementations and related backends";
+async function writeWideTree(root: string, nested = false) {
+  const content = "export const unrelated = 1;\n" + "// filler\n".repeat(640);
+  for (let directory = 0; directory < 30; directory++) {
+    const parent = join(root, `group-${directory}`, ...(nested ? ["nested"] : []));
+    await mkdir(parent, { recursive: true });
+    for (let file = 0; file < 60; file++) await writeFile(join(parent, `file-${file}.ts`), content);
+  }
+}
+testIfDocker(
+  "strong previews without useful source stop before the provider ceiling",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-false-strong-"));
+    try {
+      await writeWideTree(root);
+      let requests = 0;
+      const result = await retrieve(
+        { root, query: "behavior absent from this tree", signal: new AbortController().signal },
+        {
+          get requests() {
+            return requests;
+          },
+          async evaluate(request) {
+            if (requests >= 600) throw new EvaluationFailure("request-limit");
+            requests++;
+            const navigation = Array.isArray(request.state.items);
+            return Object.fromEntries(
+              Object.keys(request.questions).map((key) => [key, navigation ? 0.9 : 0.1]),
+            );
+          },
+        },
+      );
+      expect(result.status).toBe("incomplete");
+      expect(result.issues.some(({ kind }) => kind === "low_confidence_budget")).toBe(true);
+      expect(result.issues.some(({ kind }) => kind === "request-limit")).toBe(false);
+      expect(requests).toBeLessThan(600);
+      expect(result.files.flatMap((file) => file.excerpts)).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+for (const matchPath of ["match.ts", "group-0/match.ts"]) {
+  testIfDocker(
+    `a large source match at ${matchPath} can release a paused navigation budget`,
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "jg-large-source-proof-"));
+      try {
+        await writeWideTree(root, matchPath === "match.ts");
+        await writeFile(
+          join(root, matchPath),
+          "export function trueMatch() { return 1; }\n" + "// filler\n".repeat(2000),
+        );
+        let requests = 0;
+        const result = await retrieve(
+          { root, query: "Find trueMatch", signal: new AbortController().signal },
+          {
+            get requests() {
+              return requests;
+            },
+            async evaluate(request) {
+              if (requests >= 600) throw new EvaluationFailure("request-limit");
+              requests++;
+              const items = request.state.items;
+              return Object.fromEntries(
+                Object.keys(request.questions).map((key, index) => [
+                  key,
+                  items
+                    ? items[index].path === matchPath
+                      ? 0.99
+                      : 0.9
+                    : request.state.path === matchPath
+                      ? 0.9
+                      : 0.1,
+                ]),
+              );
+            },
+          },
+        );
+        expect(
+          result.files
+            .find((file) => file.path === matchPath)
+            ?.excerpts.some((excerpt) => excerpt.source.includes("function trueMatch")),
+        ).toBe(true);
+        expect(result.issues.some(({ kind }) => kind === "low_confidence_budget")).toBe(false);
+        expect(requests).toBeLessThanOrEqual(600);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    // Creating and parsing 1,800 files can exceed 30s on constrained runners.
+    120_000,
+  );
+}
+testIfDocker("source confirmation reuses its judgments and preserves returned source", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jg-source-reuse-"));
+  try {
+    const first = "export function first() { return 1; }\n";
+    const second = "export function second() { return 2; }\n";
+    await writeFile(join(root, "first.ts"), first);
+    await writeFile(join(root, "second.ts"), second);
+    const sources: string[] = [];
+    const result = await retrieve(
+      {
+        root,
+        query: "Find the first and second implementations",
+        signal: new AbortController().signal,
+      },
+      {
+        requests: 0,
+        async evaluate(request) {
+          if (request.state.source && request.state.selectedEvidence === undefined)
+            sources.push(request.state.path);
+          return Object.fromEntries(Object.keys(request.questions).map((key) => [key, 0.9]));
+        },
+      },
+    );
+    expect(result.status).toBe("complete");
+    expect(sources.sort()).toEqual(["first.ts", "second.ts"]);
+    expect(
+      result.files.map((file) => ({
+        path: file.path,
+        source: file.excerpts.map((excerpt) => excerpt.source).join("\n"),
+      })),
+    ).toEqual([
+      { path: "first.ts", source: first },
+      { path: "second.ts", source: second },
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+testIfDocker("weak navigation scores stop without selecting or rendering files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jg-no-match-"));
+  try {
+    for (let index = 0; index < 80; index++)
+      await writeFile(join(root, `file-${index}.ts`), `export const value = ${index};\n`);
+    let calls = 0;
+    const result = await retrieve(
+      { root, query: "behavior absent from this root", signal: new AbortController().signal },
+      {
+        get requests() {
+          return calls;
+        },
+        async evaluate(request) {
+          calls++;
+          return Object.fromEntries(Object.keys(request.questions).map((key) => [key, 0.51]));
+        },
+      },
+    );
+    expect(result.status).toBe("complete");
+    expect(result.files).toEqual([]);
+    expect(renderResult(result)).toContain("No confident match found under this root.");
+    expect(calls).toBeLessThan(10);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+testIfDocker(
+  "a wide weak-score tree stops at the navigation budget",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-weak-budget-"));
+    try {
+      await writeWideTree(root);
+      let calls = 0;
+      const result = await retrieve(
+        { root, query: "Find an absent answer", signal: new AbortController().signal },
+        {
+          get requests() {
+            return calls;
+          },
+          async evaluate(request) {
+            calls++;
+            return Object.fromEntries(Object.keys(request.questions).map((key) => [key, 0.51]));
+          },
+        },
+      );
+      expect(result.status).toBe("incomplete");
+      expect(result.files).toEqual([]);
+      expect(result.issues.some(({ kind }) => kind === "low_confidence_budget")).toBe(true);
+      expect(calls).toBeLessThan(500);
+      expect(renderResult(result)).toContain("No confident match within the navigation budget");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+for (const outcome of ["strong", "preview", "interrupted"] as const)
+  testIfDocker(
+    `a late ${outcome} response settles paused weak navigation`,
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "jg-late-strong-"));
+      try {
+        await writeWideTree(root);
+        let calls = 0;
+        let bytes = 0;
+        let weakFiles = 0;
+        let strongPath = "";
+        let releaseStrong: (() => void) | undefined;
+        let released = false;
+        const controller = new AbortController();
+        const result = await retrieve(
+          { root, query: "Find a strong lead", signal: controller.signal },
+          {
+            get requests() {
+              return calls;
+            },
+            async evaluate(request) {
+              calls++;
+              const items = (request.state as Body["state"]).items;
+              if (!items)
+                return Object.fromEntries(
+                  Object.keys(request.questions).map((key) => [
+                    key,
+                    outcome === "strong" && request.state.path === strongPath ? 0.9 : 0.1,
+                  ]),
+                );
+              bytes += Buffer.byteLength(JSON.stringify(request));
+              if (!strongPath && items[0]!.kind === "file") {
+                strongPath = items[0]!.path;
+                return new Promise<Record<string, number>>((resolve, reject) => {
+                  releaseStrong = () => {
+                    if (outcome === "interrupted") {
+                      controller.abort();
+                      reject(new EvaluationFailure("cancelled"));
+                      return;
+                    }
+                    resolve(
+                      Object.fromEntries(
+                        Object.keys(request.questions).map((key, index) => [
+                          key,
+                          index === 0 ? 0.9 : 0.1,
+                        ]),
+                      ),
+                    );
+                  };
+                });
+              }
+              if (!released && releaseStrong && bytes > 8_000_000 - 38_000) {
+                released = true;
+                setTimeout(releaseStrong, 0);
+              }
+              return Object.fromEntries(
+                Object.keys(request.questions).map((key, index) => [
+                  key,
+                  items[index]!.kind === "directory" || weakFiles++ < 64 ? 0.51 : 0.1,
+                ]),
+              );
+            },
+          },
+        );
+        expect(released).toBe(true);
+        if (outcome === "strong") {
+          expect(bytes).toBeGreaterThan(8_000_000);
+          expect(result.status).toBe("complete");
+          expect(result.files.map(({ path }) => path)).toContain(strongPath);
+        } else if (outcome === "preview") {
+          expect(bytes).toBeLessThanOrEqual(8_000_000);
+          expect(result.status).toBe("incomplete");
+        } else {
+          expect(result.status).toBe("interrupted");
+          expect(renderResult(result)).toContain("Interrupted.");
+        }
+        expect(result.issues.some(({ kind }) => kind === "low_confidence_budget")).toBe(
+          outcome === "preview",
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
+testIfDocker("a small set of weak leads remains available", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jg-weak-lead-"));
+  try {
+    await writeFile(join(root, "lead.ts"), "export function answer() { return true; }\n");
+    await writeFile(join(root, "other.ts"), "export function unrelated() { return false; }\n");
+    const result = await retrieve(
+      { root, query: "Find answer", signal: new AbortController().signal },
+      {
+        requests: 0,
+        async evaluate(request) {
+          const items = (request.state as Body["state"]).items;
+          return Object.fromEntries(
+            Object.keys(request.questions).map((key, index) => [
+              key,
+              items ? (items[index]!.path === "lead.ts" ? 0.55 : 0.1) : 0.9,
+            ]),
+          );
+        },
+      },
+    );
+    expect(result.status).toBe("complete");
+    expect(result.files.map(({ path }) => path)).toEqual(["lead.ts"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+testIfDocker(
+  "a strong lead preserves weak leads in a wide navigation level",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-strong-and-weak-"));
+    try {
+      for (let index = 0; index < 80; index++)
+        await writeFile(join(root, `file-${index}.ts`), `export const value = ${index};\n`);
+      const result = await retrieve(
+        { root, query: "Find relevant files", signal: new AbortController().signal },
+        {
+          requests: 0,
+          async evaluate(request) {
+            const items = (request.state as Body["state"]).items;
+            return Object.fromEntries(
+              Object.keys(request.questions).map((key, index) => [
+                key,
+                items ? (items[index]!.path === "file-0.ts" ? 0.9 : 0.55) : 0.9,
+              ]),
+            );
+          },
+        },
+      );
+      expect(result.files.map(({ path }) => path)).toContain("file-0.ts");
+      expect(result.files.map(({ path }) => path)).toContain("file-1.ts");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
 testIfDocker("shallow lookahead classifies file previews before admitting files", async () => {
   const root = await mkdtemp(join(tmpdir(), "jg-folder-gate-"));
   try {
@@ -49,6 +384,70 @@ testIfDocker("shallow lookahead classifies file previews before admitting files"
     await rm(root, { recursive: true, force: true });
   }
 });
+testIfDocker("relationship judgments bind each directory and file to its own source", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jg-bound-relationship-"));
+  try {
+    await writeFile(join(root, "Anchor.py"), "class Anchor:\n    def run(self): return True\n");
+    for (const directory of ["versions/implementations", "versions/misc"])
+      await mkdir(join(root, directory), { recursive: true });
+    await writeFile(
+      join(root, "versions/implementations/handler.py"),
+      "from Anchor import Anchor\nclass Alternative(Anchor):\n    def run(self): return False\n",
+    );
+    await writeFile(
+      join(root, "versions/implementations/utility.py"),
+      "def unrelated(): return False\n",
+    );
+    await writeFile(join(root, "versions/misc/other.py"), "class Unrelated: pass\n");
+    const result = await retrieve(
+      {
+        root,
+        query: "How does the primary implementation run?",
+        signal: new AbortController().signal,
+      },
+      {
+        requests: 0,
+        async evaluate(request) {
+          const items = (request.state as Body["state"]).items;
+          return Object.fromEntries(
+            Object.entries(request.questions).map(([key, question], index) => {
+              if (!items) return [key, 0.9];
+              const item = items[index]!;
+              const instructions = (question as { instructions: string }).instructions;
+              if (!(request.state as Body["state"]).relationAnchor)
+                return [key, item.path === "Anchor.py" ? 0.9 : 0.1];
+              // The provider must know which item's source to judge. An unbound
+              // predicate can reuse the positive subclass for unrelated siblings.
+              if (!instructions.includes("relationAnchor.classes")) return [key, 0.1];
+              if (
+                !instructions.includes(`state.items[${index}]`) &&
+                !instructions.includes(JSON.stringify(item.path))
+              )
+                return [key, 0.9];
+              return [
+                key,
+                ["versions/implementations", "versions/implementations/handler.py"].includes(
+                  item.path,
+                )
+                  ? 0.9
+                  : 0.1,
+              ];
+            }),
+          );
+        },
+      },
+    );
+    expect(result.status).toBe("complete");
+    expect(result.files.map(({ path }) => path).sort()).toEqual([
+      "Anchor.py",
+      "versions/implementations/handler.py",
+    ]);
+    expect(renderResult(result)).toContain("class Alternative(Anchor)");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function trajectory(
   root: string,
   reverseRelationCompletion = false,
@@ -318,7 +717,7 @@ testIfDocker(
   120_000,
 );
 
-testIfDocker(
+testIfDockerPosix(
   "unavailable directory previews are skipped rather than classified as empty metadata",
   async () => {
     const root = await mkdtemp(join(tmpdir(), "jg-preview-unavailable-"));

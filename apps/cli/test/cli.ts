@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const testInDocker = process.env.JEVGREP_TEST_IN_DOCKER === "1" ? test : test.skip;
+export { posix, testIfDockerPosix as testInDockerPosix } from "../../../test/helpers/docker";
 
 export async function withCli(
   runTest: (context: {

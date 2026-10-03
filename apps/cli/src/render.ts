@@ -1,4 +1,5 @@
 import type { Inventory, RetrievalResult } from "@repo/core";
+import { navigationByteBudget } from "@repo/core";
 
 function quote(value: string): string {
   return JSON.stringify(value).replace(
@@ -8,11 +9,13 @@ function quote(value: string): string {
 }
 
 export const DEFAULT_MAX_SOURCE_BYTES = 0;
+export const DEFAULT_MAX_OUTPUT_BYTES = 256_000;
 
 /** Present source before detailed reading leads so truncated output remains useful. */
 export function renderResult(
   result: RetrievalResult,
   maxSourceBytes = DEFAULT_MAX_SOURCE_BYTES,
+  maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
 ): string {
   let remaining = maxSourceBytes || Infinity;
   const files = [...result.files]
@@ -39,6 +42,14 @@ export function renderResult(
   const omittedCount = files.filter(({ omitted }) => omitted).length;
   const lines = [
     `Jevgrep: ${files.length} relevant files${result.status !== "complete" ? "; discovery incomplete" : ""}.`,
+    ...(files.length === 0 && result.status === "complete"
+      ? ["No confident match found under this root."]
+      : []),
+    ...(result.issues.some(({ kind }) => kind === "low_confidence_budget")
+      ? [
+          `No confident match within the navigation budget (${navigationByteBudget} serialized bytes); narrow the root to continue.`,
+        ]
+      : []),
     "Symbols use name@start-end. Roles are estimates; locations-only files remain reading leads.",
     `AGENTS.md lookup (root and returned-file ancestors): ${context.instructionFiles.length ? context.instructionFiles.map(quote).join(", ") : "none found"}${context.instructionLookupIncomplete ? "; lookup incomplete" : ""}.`,
     ...(result.status === "interrupted" ? ["Interrupted."] : []),
@@ -90,7 +101,31 @@ export function renderResult(
       ...(omitted ? ["  Some source omitted; locations remain available."] : []),
     );
   }
-  return lines.join("\n") + "\n\nEnd context.\n";
+  const output = lines.join("\n") + "\n\nEnd context.\n";
+  const outputBytes = Buffer.byteLength(output);
+  if (!maxOutputBytes || outputBytes <= maxOutputBytes) return output;
+  const suffix = (omittedBytes: number) =>
+    `\nOutput truncated at the byte limit (${maxOutputBytes} bytes); ${omittedBytes} original bytes omitted.\n\nEnd context.\n`;
+  const suffixBytes = Buffer.byteLength(suffix(outputBytes));
+  let prefix = "";
+  let prefixBytes = 0;
+  let openFence = "";
+  for (const line of lines) {
+    const nextFence = openFence
+      ? line === openFence
+        ? ""
+        : openFence
+      : /^`{3,}$/.test(line)
+        ? line
+        : "";
+    const lineBytes = Buffer.byteLength(line) + 1;
+    const closingBytes = nextFence ? Buffer.byteLength(nextFence) + 1 : 0;
+    if (prefixBytes + lineBytes + closingBytes + suffixBytes > maxOutputBytes) break;
+    prefix += line + "\n";
+    prefixBytes += lineBytes;
+    openFence = nextFence;
+  }
+  return prefix + (openFence ? openFence + "\n" : "") + suffix(outputBytes - prefixBytes);
 }
 
 function size(bytes: number): string {
