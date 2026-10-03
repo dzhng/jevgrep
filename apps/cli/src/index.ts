@@ -132,7 +132,9 @@ async function main() {
         evaluator,
       );
       if (pipeClosed) return;
-      await write(renderResult(result, command.maxSourceBytes, command.maxOutputBytes));
+      await write(
+        renderResult(result, command.maxSourceBytes, command.maxOutputBytes, !command.noLocations),
+      );
       process.exitCode =
         result.status === "interrupted" ? 130 : result.status === "incomplete" ? 2 : 0;
     }
