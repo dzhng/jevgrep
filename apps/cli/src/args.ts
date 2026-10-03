@@ -227,8 +227,8 @@ Skill installation options:
   --global        Install for the current user instead of this project
   --yes           Skip installer confirmation prompts
 
-Skill installation requires npm/npx and network access. Without options,
-the skills installer prompts for agents and installation settings.
+Skill installation requires Node 22.20+ (skills@1.7.0), npm/npx, and network access.
+Without options, the installer prompts for agents and installation settings.
 
 Search options:
   --max-requests N         Provider request ceiling (default: 1000)

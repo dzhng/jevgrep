@@ -113,17 +113,13 @@ The installer detects your coding agents (Claude Code, Codex, OpenCode and
 others) and asks where to install. `jg skill` also accepts `--agent NAME`
 (repeatable), `--global`, and `--yes`; these options come from the
 [skills CLI](https://github.com/vercel-labs/skills#install-a-skill), which it
-delegates to, so it requires npm/npx and network access. You can run that
-installer directly as well:
+delegates to. Use `jg skill` so the installed instructions match your CLI release;
+it installs the bundled skill with npm lifecycle scripts disabled and requires
+Node 22.20+ and npm/npx with network access for the pinned installer. Installer
+transitive dependencies remain an external trust boundary.
 
-```sh
-npx skills add dzhng/jevgrep --skill jevgrep
-```
-
-Installing the skill does not install the `jg` executable or configure its key.
-The current repository skill installs a missing CLI when the agent first uses it;
-0.1.0's bundled skill predates that setup step, and its `jg skill` only prints
-text, so use `npx skills` directly with that version.
+Installing the skill does not configure the provider key. Users of 0.1.0, whose
+`jg skill` only prints the skill, should upgrade the CLI first.
 
 Search does not install skills or edit agent configuration. Only an explicit
 skill installation command invokes the installer. The skill directs the agent
@@ -132,7 +128,9 @@ the needed context is already known, and handle incomplete results honestly.
 
 There is no built-in upgrade command. Use `npm install --global @dzhng/jevgrep@latest`
 to upgrade the CLI, then rerun `jg skill` to update
-the agent's copy too.
+the agent's copy too. The installer records a machine-specific local path in
+`skills-lock.json`; `skills update` skips this entry. Rerun `jg skill` on another
+machine or after changing your Node installation.
 
 See the [repository](https://github.com/dzhng/jevgrep) for architecture, official
 benchmark evidence and development. Jevgrep is MIT licensed.

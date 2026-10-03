@@ -1,12 +1,24 @@
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import type { Command } from "./args";
 import { CliError } from "./errors";
+
+declare const JEVGREP_BUNDLED: boolean;
 
 export async function installSkill(
   command: Extract<Command, { kind: "skill" }>,
   signal: AbortSignal,
 ): Promise<number> {
-  const args = ["--yes", "skills", "add", "dzhng/jevgrep", "--skill", "jevgrep"];
+  const [major, minor] = process.versions.node.split(".").map(Number);
+  if (major! < 22 || (major === 22 && minor! < 20))
+    throw new CliError("jg skill requires Node 22.20 or newer (skills@1.7.0).");
+  const source = fileURLToPath(
+    new URL(
+      typeof JEVGREP_BUNDLED !== "undefined" ? "../skills/jevgrep" : "../../../skills/jevgrep",
+      import.meta.url,
+    ),
+  );
+  const args = ["--yes", "--ignore-scripts", "skills@1.7.0", "add", source, "--skill", "jevgrep"];
   for (const agent of command.agents) args.push("--agent", agent);
   if (command.global) args.push("--global");
   if (command.yes) args.push("--yes");

@@ -435,9 +435,10 @@ test("skill command delegates installation to npx without credentials", async (t
   assert.match(result.stdout, /Installer completed/);
   assert.deepEqual(JSON.parse(await readFile(join(fixture.tree, "installed-skill.json"), "utf8")), [
     "--yes",
-    "skills",
+    "--ignore-scripts",
+    "skills@1.7.0",
     "add",
-    "dzhng/jevgrep",
+    join(packageDirectory, "dist/skills/jevgrep"),
     "--skill",
     "jevgrep",
     "--agent",
@@ -455,9 +456,10 @@ test("skill command delegates installation to npx without credentials", async (t
   assert.equal(failed.code, 7, failed.stdout);
   assert.deepEqual(JSON.parse(await readFile(join(fixture.tree, "installed-skill.json"), "utf8")), [
     "--yes",
-    "skills",
+    "--ignore-scripts",
+    "skills@1.7.0",
     "add",
-    "dzhng/jevgrep",
+    join(packageDirectory, "dist/skills/jevgrep"),
     "--skill",
     "jevgrep",
   ]);
