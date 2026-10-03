@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  cloudflareRunURL,
   customProviderId,
   endpointFor,
   isCredentialProvider,
@@ -63,4 +64,29 @@ test("custom is a selectable credential provider and unknown names stay invalid"
   expect(isCredentialProvider("vercel")).toBe(true);
   for (const value of ["unknown", "Custom", "", undefined, 7])
     expect(isCredentialProvider(value)).toBe(false);
+});
+
+test("Cloudflare resolves its gateway URL without a trailing slash onto the Workers AI route", () => {
+  for (const baseURL of [
+    "https://gateway.ai.cloudflare.com/v1/account/gateway",
+    " https://gateway.ai.cloudflare.com/v1/account/gateway/ ",
+  ])
+    expect(endpointFor({ provider: "cloudflare", baseURL })).toEqual({
+      label: "Cloudflare AI Gateway (gateway.ai.cloudflare.com)",
+      baseURL: "https://gateway.ai.cloudflare.com/v1/account/gateway",
+      model: "typesafe/jev",
+    });
+  expect(cloudflareRunURL("https://ai.example.com")).toBe(
+    "https://ai.example.com/workers-ai/run/typesafe/jev",
+  );
+  expect(isCredentialProvider("cloudflare")).toBe(true);
+  for (const baseURL of [
+    undefined,
+    "",
+    "http://ai.example.com",
+    "https://ai.example.com/?x=1",
+    "https://gateway.ai.cloudflare.com/v1/account/gateway/workers-ai/run/typesafe/jev",
+    "https://ai.example.com/compat",
+  ])
+    expect(() => endpointFor({ provider: "cloudflare", baseURL })).toThrow();
 });

@@ -1,6 +1,11 @@
 import { APICallError, experimental_evaluate as evaluate } from "ai";
 import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
-import { endpointFor, type CredentialProvider } from "./providers";
+import {
+  cloudflareProviderId,
+  cloudflareRunURL,
+  endpointFor,
+  type CredentialProvider,
+} from "./providers";
 import { type createEvaluationCache, type CacheInput } from "./cache";
 import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
@@ -42,6 +47,8 @@ export function createEvaluator(options: {
   concurrency?: number;
 }) {
   const endpoint = endpointFor(options);
+  const cloudflareRoute =
+    options.provider === cloudflareProviderId ? cloudflareRunURL(endpoint.baseURL) : undefined;
   const concurrency = options.concurrency ?? 32;
   const timeoutMs = options.timeoutMs ?? (options.provider === "typesafe" ? 60_000 : 15_000);
   if (!Number.isSafeInteger(concurrency) || concurrency < 1)
@@ -87,7 +94,10 @@ export function createEvaluator(options: {
       if (requests >= (options.requestLimit ?? 50_000))
         throw new EvaluationFailure("request-limit");
       requests++;
-      const response = await (options.fetch ?? fetch)(input, init);
+      const transport = options.fetch ?? fetch;
+      const response = cloudflareRoute
+        ? await cloudflareTransport(transport, cloudflareRoute, init)
+        : await transport(input, init);
       if (response.status === 429) {
         const raw = response.headers.get("retry-after");
         const seconds = raw === null ? NaN : Number(raw);
@@ -284,4 +294,34 @@ function providerDiagnostic(error: unknown, apiKey: string): EvaluationFailure["
   if (apiKey && redacted.replace(/\s/gu, "").includes(apiKey))
     return { statusCode: error.statusCode };
   return { statusCode: error.statusCode, message: redacted.slice(0, 500) || undefined };
+}
+
+/**
+ * Cloudflare's Workers AI route takes the model from its path and the gateway token as
+ * cf-aig-authorization, and wraps the TypeSafe answer as {state: "Completed", result}.
+ * Error responses pass through unchanged so status handling stays with the evaluator.
+ */
+async function cloudflareTransport(
+  transport: typeof fetch,
+  route: string,
+  init: RequestInit | undefined,
+): Promise<Response> {
+  const input = JSON.parse(String(init?.body));
+  delete input.model;
+  const headers = new Headers(init?.headers);
+  const authorization = headers.get("authorization");
+  headers.delete("authorization");
+  if (authorization) headers.set("cf-aig-authorization", authorization);
+  // Fetch drops Authorization on a cross-origin redirect but would forward cf-aig-authorization.
+  const response = await transport(route, {
+    ...init,
+    headers,
+    body: JSON.stringify(input),
+    redirect: "error",
+  });
+  if (!response.ok) return response;
+  const envelope = (await response.json()) as { state?: unknown; result?: unknown } | null;
+  // Only a Completed envelope carries an answer; anything else fails answer validation.
+  const answer = envelope?.state === "Completed" ? (envelope.result ?? null) : null;
+  return Response.json(answer, { status: response.status });
 }

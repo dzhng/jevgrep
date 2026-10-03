@@ -27,7 +27,16 @@ export type ProviderId = keyof typeof providers;
 export const customProviderId = "custom";
 export const customProviderLabel = "Custom endpoint";
 
-export type CredentialProvider = ProviderId | typeof customProviderId;
+/**
+ * Cloudflare AI Gateway serves Jev only as a Workers AI model, at
+ * <gateway>/workers-ai/run/typesafe/jev with its own auth header and result envelope, so
+ * its record saves the account's gateway URL and the evaluator adapts that one request.
+ */
+export const cloudflareProviderId = "cloudflare";
+export const cloudflareProviderLabel = "Cloudflare AI Gateway";
+const cloudflareModel = "typesafe/jev";
+
+export type CredentialProvider = ProviderId | typeof customProviderId | typeof cloudflareProviderId;
 
 export type ProviderEndpoint = { label: string; baseURL: string; model: string };
 
@@ -41,15 +50,21 @@ export function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && Object.hasOwn(providers, value);
 }
 
+/** Every saved-provider name, in the order auth offers them; custom stays last. */
+export const credentialProviders: CredentialProvider[] = [
+  ...(Object.keys(providers) as ProviderId[]),
+  cloudflareProviderId,
+  customProviderId,
+];
+
 export function isCredentialProvider(value: unknown): value is CredentialProvider {
-  return value === customProviderId || isProviderId(value);
+  return credentialProviders.includes(value as CredentialProvider);
 }
 
 const loopbackHosts = new Set(["localhost", "127.0.0.1"]);
 
 export function validateBaseURL(value: unknown): string {
-  if (typeof value !== "string" || !value.trim())
-    throw new Error("Provide a base URL for the custom endpoint.");
+  if (typeof value !== "string" || !value.trim()) throw new Error("Provide the endpoint base URL.");
   const baseURL = value.trim();
   let url: URL;
   try {
@@ -84,9 +99,27 @@ function customEndpoint(selection: ProviderSelection): ProviderEndpoint {
   };
 }
 
+function cloudflareEndpoint(selection: ProviderSelection): ProviderEndpoint {
+  // The route is appended to the gateway URL, so a trailing slash would double it.
+  const baseURL = validateBaseURL(selection.baseURL).replace(/\/+$/, "");
+  // A URL copied from a provider route would double the route Jevgrep appends.
+  if (/\/(workers-ai|compat)(\/|$)/.test(new URL(baseURL).pathname))
+    throw new Error("Enter the gateway URL itself, without a /workers-ai or /compat route.");
+  return {
+    label: `${cloudflareProviderLabel} (${new URL(baseURL).host})`,
+    baseURL,
+    model: cloudflareModel,
+  };
+}
+
+/** The Workers AI route that serves Jev behind a Cloudflare gateway base URL. */
+export function cloudflareRunURL(baseURL: string) {
+  return `${baseURL}/workers-ai/run/${cloudflareModel}`;
+}
+
 /** Resolve the transport settings for a saved record without exposing its key. */
 export function endpointFor(selection: ProviderSelection): ProviderEndpoint {
-  return selection.provider === customProviderId
-    ? customEndpoint(selection)
-    : providers[selection.provider];
+  if (selection.provider === customProviderId) return customEndpoint(selection);
+  if (selection.provider === cloudflareProviderId) return cloudflareEndpoint(selection);
+  return providers[selection.provider];
 }

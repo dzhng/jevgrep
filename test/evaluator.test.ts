@@ -685,3 +685,149 @@ test("token-queued requests revalidate source after waiting", async () => {
   expect(await queued).toMatchObject({ kind: "source-invalid" });
   expect(calls).toBe(3);
 }, 10_000);
+
+test("Cloudflare AI Gateway uses the Workers AI route, gateway auth and unwraps the result", async () => {
+  const seen: { path: string; auth: string | null; gatewayAuth: string | null; body: unknown }[] =
+    [];
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      seen.push({
+        path: new URL(request.url).pathname,
+        auth: request.headers.get("authorization"),
+        gatewayAuth: request.headers.get("cf-aig-authorization"),
+        body: await request.json(),
+      });
+      return Response.json({
+        state: "Completed",
+        result: { model: "jev-1.13.0", answers: { useful: { type: "noul", noul: 0.7 } } },
+      });
+    },
+  });
+  try {
+    const evaluator = createEvaluator({
+      apiKey: "cf-token",
+      provider: "cloudflare",
+      baseURL: `http://127.0.0.1:${server.port}/v1/account/gateway/`,
+      signal: new AbortController().signal,
+    });
+    const result = await evaluator.evaluate({
+      state: "recordEvent()",
+      questions: { useful: { type: "boolean", instructions: "Is the source useful?" } },
+    });
+    expect(result).toEqual({ useful: 0.7 });
+    expect(seen).toEqual([
+      {
+        path: "/v1/account/gateway/workers-ai/run/typesafe/jev",
+        auth: null,
+        gatewayAuth: "Bearer cf-token",
+        body: {
+          state: "recordEvent()",
+          questions: { useful: { type: "noul", instructions: "Is the source useful?" } },
+        },
+      },
+    ]);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("Cloudflare gateway rejection is an authentication failure, and a missing URL never calls out", async () => {
+  let calls = 0;
+  const server = Bun.serve({
+    port: 0,
+    fetch() {
+      calls++;
+      return Response.json({ success: false, errors: [{ code: 10000 }] }, { status: 401 });
+    },
+  });
+  const request = {
+    state: "test",
+    questions: { q: { type: "boolean" as const, instructions: "Relevant?" } },
+  };
+  try {
+    const evaluator = createEvaluator({
+      apiKey: "bad",
+      provider: "cloudflare",
+      baseURL: `http://127.0.0.1:${server.port}`,
+      signal: new AbortController().signal,
+    });
+    await expect(evaluator.evaluate(request)).rejects.toMatchObject({ kind: "authentication" });
+    expect(calls).toBe(1);
+    for (const baseURL of [undefined, "http://gateway.example/v1/a/g"])
+      expect(() =>
+        createEvaluator({
+          apiKey: "x",
+          provider: "cloudflare",
+          baseURL,
+          signal: new AbortController().signal,
+        }),
+      ).toThrow();
+    expect(calls).toBe(1);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("Cloudflare transport never follows a redirect with the gateway token", async () => {
+  let leaked = 0;
+  const target = Bun.serve({
+    port: 0,
+    fetch() {
+      leaked++;
+      return Response.json({ result: { answers: { q: { type: "noul", noul: 0.9 } } } });
+    },
+  });
+  const gateway = Bun.serve({
+    port: 0,
+    fetch: () => Response.redirect(`http://127.0.0.1:${target.port}/elsewhere`, 307),
+  });
+  try {
+    const evaluator = createEvaluator({
+      apiKey: "cf-token",
+      provider: "cloudflare",
+      baseURL: `http://127.0.0.1:${gateway.port}`,
+      signal: new AbortController().signal,
+    });
+    await expect(
+      evaluator.evaluate({
+        state: "test",
+        questions: { q: { type: "boolean", instructions: "Relevant?" } },
+      }),
+    ).rejects.toMatchObject({ kind: "provider" });
+    expect(leaked).toBe(0);
+  } finally {
+    gateway.stop(true);
+    target.stop(true);
+  }
+});
+
+test("Cloudflare answers count only from a Completed envelope, never as negative evidence", async () => {
+  const bodies = [
+    { state: "Queued", result: { answers: { q: { type: "noul", noul: 0.9 } } } },
+    { state: "Completed" },
+    { answers: { q: { type: "noul", noul: 0.9 } } },
+  ];
+  let calls = 0;
+  const server = Bun.serve({ port: 0, fetch: () => Response.json(bodies[calls++]) });
+  try {
+    for (const _ of bodies) {
+      const evaluator = createEvaluator({
+        apiKey: "cf-token",
+        provider: "cloudflare",
+        baseURL: `http://127.0.0.1:${server.port}`,
+        signal: new AbortController().signal,
+        requestLimit: 1,
+      });
+      await expect(
+        evaluator.evaluate({
+          state: "test",
+          questions: { q: { type: "boolean", instructions: "Relevant?" } },
+        }),
+      ).rejects.toBeInstanceOf(Error);
+    }
+    expect(calls).toBe(3);
+  } finally {
+    server.stop(true);
+  }
+});

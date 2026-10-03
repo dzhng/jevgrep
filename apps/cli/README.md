@@ -66,6 +66,19 @@ These answers need neither `probabilities` nor `confidence`. A server that deman
 `criteria.true` and returns HTTP 422 is incompatible with these requests. Run
 `jg doctor` against a custom gateway before searching a repository.
 
+Cloudflare AI Gateway serves Jev on its Workers AI route rather than a
+TypeSafe-compatible path, so it is its own provider instead of a custom endpoint.
+Choose “Cloudflare AI Gateway” in `auth` and enter the gateway URL, either
+`https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY` or the gateway's custom
+domain, then a token with the account's AI Gateway Run permission. Jev is billed
+through Cloudflare Unified Billing. The
+[Cloudflare provider record](../../specs/done/cloudflare-provider/README.md) explains
+the route and its invariants. For piped setup:
+
+```sh
+jg auth --provider cloudflare --base-url https://gateway.ai.cloudflare.com/v1/ACCOUNT_ID/GATEWAY --stdin
+```
+
 Credentials are saved under
 `$XDG_CONFIG_HOME/jevgrep/credentials.json`, or `~/.config/jevgrep/credentials.json`.
 On Windows, config defaults to `%APPDATA%\jevgrep` and cache to `%LOCALAPPDATA%\jevgrep`.

@@ -46,6 +46,12 @@ const providers = {
     url: "https://opencode.ai/zen/v1/systemone",
     model: "jev-1.13",
   },
+  cloudflare: {
+    label: "Cloudflare AI Gateway",
+    url: "https://gateway.ai.cloudflare.com/v1/fixture-account/fixture-gateway/workers-ai/run/typesafe/jev",
+    model: "typesafe/jev",
+    baseURL: "https://gateway.ai.cloudflare.com/v1/fixture-account/fixture-gateway",
+  },
 };
 const fixtureKey = "installed-http-fixture-key";
 const forbidden = "INSTALLED_FIXTURE_IGNORED_CONTENT_MUST_NEVER_UPLOAD";
@@ -118,10 +124,14 @@ async function context(t, mode = "healthy", executable = binary) {
       const preset = providers[expectedProvider];
       assert.equal(request.url, new URL(preset.url).pathname);
       assert.equal(request.headers["x-jevgrep-original-url"], preset.url);
+      // Cloudflare's Workers AI route takes the gateway token and the model from its path.
+      const cloudflare = expectedProvider === "cloudflare";
       assert.ok(
-        request.headers.authorization === `Bearer ${expectedKey}`,
+        request.headers[cloudflare ? "cf-aig-authorization" : "authorization"] ===
+          `Bearer ${expectedKey}`,
         "Saved key must authenticate the request",
       );
+      if (cloudflare) assert.equal(request.headers.authorization, undefined);
       assert.match(request.headers["content-type"] ?? "", /^application\/json/);
       const chunks = [];
       let bytes = 0;
@@ -133,8 +143,11 @@ async function context(t, mode = "healthy", executable = binary) {
       const raw = Buffer.concat(chunks).toString("utf8");
       assert.ok(!raw.includes(forbidden), "Ignored/hidden source reached the provider");
       const body = JSON.parse(raw);
-      assert.deepEqual(Object.keys(body).sort(), ["model", "questions", "state"]);
-      assert.equal(body.model, preset.model);
+      assert.deepEqual(
+        Object.keys(body).sort(),
+        cloudflare ? ["questions", "state"] : ["model", "questions", "state"],
+      );
+      if (!cloudflare) assert.equal(body.model, preset.model);
       assert.equal(
         typeof body.state,
         "object",
@@ -220,15 +233,14 @@ async function context(t, mode = "healthy", executable = binary) {
       const ids = Object.keys(body.questions);
       assert.equal(probabilities.length, ids.length);
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(
-        JSON.stringify({
-          answers: Object.fromEntries(
-            ids.map((id, index) => [id, { type: "noul", noul: probabilities[index] }]),
-          ),
-          usage: { input_tokens: 1, output_tokens: 1 },
-          warnings: [{ type: "other", message: "installed-fixture-warning" }],
-        }),
-      );
+      const answer = {
+        answers: Object.fromEntries(
+          ids.map((id, index) => [id, { type: "noul", noul: probabilities[index] }]),
+        ),
+        usage: { input_tokens: 1, output_tokens: 1 },
+        warnings: [{ type: "other", message: "installed-fixture-warning" }],
+      };
+      response.end(JSON.stringify(cloudflare ? { state: "Completed", result: answer } : answer));
     })().catch((error) => {
       protocolErrors.push(error.message);
       response.writeHead(400, { "content-type": "application/json" });
@@ -1181,8 +1193,9 @@ for (const [provider, preset] of Object.entries(providers))
     await fixture.removeCredentials();
     const key = `installed-${provider}-saved-key`;
     fixture.expectProvider(provider, key);
+    const gateway = preset.baseURL ? ["--base-url", preset.baseURL] : [];
     const auth = await fixture.run(
-      ["auth", "--provider", provider, "--stdin"],
+      ["auth", "--provider", provider, ...gateway, "--stdin"],
       {},
       false,
       key + "\n",
@@ -1193,6 +1206,7 @@ for (const [provider, preset] of Object.entries(providers))
     assert.equal(fixture.requests.length, 0, "Auth must not contact any provider");
     assert.deepEqual(JSON.parse(await readFile(fixture.credentials, "utf8")), {
       provider,
+      ...(preset.baseURL ? { baseURL: preset.baseURL } : {}),
       apiKey: key,
     });
     assert.equal((await stat(fixture.credentials)).mode & 0o777, 0o600);
@@ -1282,9 +1296,16 @@ test("installed saved credentials defeat conflicting environment and environment
     AI_GATEWAY_MODEL: "environment-model",
     TYPESAFE_MODEL: "environment-model",
     OPENROUTER_MODEL: "environment-model",
+    CLOUDFLARE_API_TOKEN: "environment-cloudflare-key",
+    CF_AIG_TOKEN: "environment-cloudflare-gateway-key",
+    CLOUDFLARE_GATEWAY_URL: "http://127.0.0.1:1/forbidden",
   };
   for (const provider of Object.keys(providers)) {
-    await writeFile(fixture.credentials, JSON.stringify({ provider, apiKey: fixtureKey }));
+    const baseURL = providers[provider].baseURL;
+    await writeFile(
+      fixture.credentials,
+      JSON.stringify({ provider, apiKey: fixtureKey, ...(baseURL ? { baseURL } : {}) }),
+    );
     fixture.expectProvider(provider);
     const doctor = await fixture.run(["doctor"], conflicts);
     assert.equal(doctor.code, 0, doctor.stdout);
@@ -1304,8 +1325,15 @@ test("installed saved credentials defeat conflicting environment and environment
 
 test("installed invalid saved providers fail before HTTP without rewriting credentials", async (t) => {
   const fixture = await context(t);
-  for (const provider of [null, "", "unknown", false, 0, {}, []]) {
-    const original = JSON.stringify({ provider, apiKey: fixtureKey }) + "\n";
+  const records = [null, "", "unknown", false, 0, {}, []].map((provider) => ({
+    provider,
+    apiKey: fixtureKey,
+  }));
+  // A Cloudflare record is only valid with its https gateway URL; it never falls back.
+  for (const baseURL of [undefined, "", "http://gateway.example/v1/a/g", "not a url"])
+    records.push({ provider: "cloudflare", apiKey: fixtureKey, baseURL });
+  for (const record of records) {
+    const original = JSON.stringify(record) + "\n";
     await writeFile(fixture.credentials, original);
     for (const args of [["doctor"], [query]]) {
       const result = await fixture.run(args);
