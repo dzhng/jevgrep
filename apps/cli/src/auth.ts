@@ -1,13 +1,14 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { isCancel, password, select, text } from "@clack/prompts";
+import { confirm, isCancel, password, select, text } from "@clack/prompts";
 import {
   customProviderId,
   customProviderLabel,
   endpointFor,
   isCredentialProvider,
   providers,
+  requiresInsecure,
   validateBaseURL,
   validateModel,
   type CredentialProvider,
@@ -16,8 +17,9 @@ import {
 import { storageDirectory } from "@repo/core/storage";
 import { CliError } from "./errors";
 
-function validateKey(raw: string): string {
+function validateKey(raw: string, insecure = false): string {
   const key = raw.trim();
+  if (!key && insecure) return "";
   if (!key || /\s/.test(key) || Buffer.byteLength(key) > 8192) {
     throw new CliError("Provide one non-empty API key without whitespace (maximum 8 KiB).");
   }
@@ -26,12 +28,19 @@ function validateKey(raw: string): string {
 
 export type Credentials =
   | { provider: ProviderId; apiKey: string }
-  | { provider: typeof customProviderId; baseURL: string; model: string; apiKey: string };
+  | {
+      provider: typeof customProviderId;
+      baseURL: string;
+      model: string;
+      apiKey: string;
+      insecure?: boolean;
+    };
 
 export type AuthOptions = {
   provider?: CredentialProvider;
   baseURL?: string;
   model?: string;
+  insecure?: boolean;
 };
 
 type CustomEndpoint = { baseURL: string; model: string };
@@ -42,13 +51,16 @@ function invalid(error: unknown) {
 
 function customEndpoint(options: AuthOptions): CustomEndpoint {
   try {
-    return { baseURL: validateBaseURL(options.baseURL), model: validateModel(options.model) };
+    return {
+      baseURL: validateBaseURL(options.baseURL, { insecure: options.insecure }),
+      model: validateModel(options.model),
+    };
   } catch (error) {
     throw new CliError(invalid(error));
   }
 }
 
-async function readKey(signal: AbortSignal): Promise<string> {
+async function readKey(signal: AbortSignal, insecure: boolean): Promise<string> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   const abort = () => process.stdin.destroy(new DOMException("Interrupted", "AbortError"));
@@ -60,19 +72,22 @@ async function readKey(signal: AbortSignal): Promise<string> {
       if (bytes > 8192) throw new CliError("Auth input exceeds 8 KiB.");
       chunks.push(Buffer.from(chunk));
     }
-    return validateKey(Buffer.concat(chunks).toString("utf8"));
+    return validateKey(Buffer.concat(chunks).toString("utf8"), insecure);
   } finally {
     signal.removeEventListener("abort", abort);
   }
 }
 
-async function promptEndpoint(signal: AbortSignal): Promise<CustomEndpoint> {
+async function promptEndpoint(
+  signal: AbortSignal,
+  insecure: boolean,
+): Promise<CustomEndpoint & { insecure: boolean }> {
   const baseURL = await text({
     message: "Base URL of the custom endpoint",
     placeholder: "https://gateway.example.com/typesafe/v1",
     validate: (value) => {
       try {
-        validateBaseURL(value);
+        validateBaseURL(value, { insecure: true });
       } catch (error) {
         return invalid(error);
       }
@@ -81,6 +96,18 @@ async function promptEndpoint(signal: AbortSignal): Promise<CustomEndpoint> {
     signal,
   });
   if (isCancel(baseURL)) throw new DOMException("Interrupted", "AbortError");
+  let allowInsecure = insecure;
+  if (!allowInsecure && requiresInsecure(baseURL)) {
+    const confirmed = await confirm({
+      message:
+        "That endpoint uses plain http://. Source content and answers will be sent " +
+        "unencrypted and unauthenticated. Use it anyway?",
+      output: process.stdout,
+      signal,
+    });
+    if (isCancel(confirmed) || !confirmed) throw new DOMException("Interrupted", "AbortError");
+    allowInsecure = true;
+  }
   const model = await text({
     message: "Model ID served by that endpoint",
     placeholder: "your-gateway/jev",
@@ -95,7 +122,10 @@ async function promptEndpoint(signal: AbortSignal): Promise<CustomEndpoint> {
     signal,
   });
   if (isCancel(model)) throw new DOMException("Interrupted", "AbortError");
-  return customEndpoint({ baseURL, model });
+  return {
+    ...customEndpoint({ baseURL, model, insecure: allowInsecure }),
+    insecure: allowInsecure,
+  };
 }
 
 async function save(credentials: Credentials, signal: AbortSignal) {
@@ -116,20 +146,29 @@ async function save(credentials: Credentials, signal: AbortSignal) {
   }
 }
 
-async function readPassword(message: string, signal: AbortSignal): Promise<string> {
+async function readPassword(
+  message: string,
+  signal: AbortSignal,
+  insecure: boolean,
+): Promise<string> {
   const answer = await password({ message, output: process.stdout, signal });
   if (isCancel(answer)) throw new DOMException("Interrupted", "AbortError");
-  return validateKey(answer);
+  return validateKey(answer, insecure);
 }
 
 export async function authenticate(options: AuthOptions, signal: AbortSignal) {
   let credentials: Credentials;
   if (options.provider !== undefined) {
     if (options.provider === customProviderId) {
-      const endpoint = customEndpoint(options);
-      credentials = { provider: customProviderId, ...endpoint, apiKey: await readKey(signal) };
+      const insecure = options.insecure === true;
+      credentials = {
+        provider: customProviderId,
+        ...customEndpoint(options),
+        apiKey: await readKey(signal, insecure),
+        ...(insecure ? { insecure: true } : {}),
+      };
     } else {
-      credentials = { provider: options.provider, apiKey: await readKey(signal) };
+      credentials = { provider: options.provider, apiKey: await readKey(signal, false) };
     }
   } else {
     if (!process.stdin.isTTY)
@@ -152,16 +191,26 @@ export async function authenticate(options: AuthOptions, signal: AbortSignal) {
     });
     if (isCancel(selected)) throw new DOMException("Interrupted", "AbortError");
     if (selected === customProviderId) {
-      const endpoint = await promptEndpoint(signal);
+      const endpoint = await promptEndpoint(signal, options.insecure === true);
       credentials = {
         provider: customProviderId,
-        ...endpoint,
-        apiKey: await readPassword("Paste the API key for that endpoint", signal),
+        baseURL: endpoint.baseURL,
+        model: endpoint.model,
+        apiKey: await readPassword(
+          "Paste the API key for that endpoint",
+          signal,
+          endpoint.insecure,
+        ),
+        ...(endpoint.insecure ? { insecure: true } : {}),
       };
     } else {
       credentials = {
         provider: selected,
-        apiKey: await readPassword(`Paste your ${providers[selected].label} API key`, signal),
+        apiKey: await readPassword(
+          `Paste your ${providers[selected].label} API key`,
+          signal,
+          false,
+        ),
       };
     }
   }
@@ -169,6 +218,11 @@ export async function authenticate(options: AuthOptions, signal: AbortSignal) {
   process.stdout.write(
     `${endpointFor(credentials).label} key saved. Run jg doctor to verify access.\n`,
   );
+  if (credentials.provider === customProviderId && credentials.insecure)
+    process.stdout.write(
+      `Warning: source content and answers go to ${new URL(credentials.baseURL).host} ` +
+        "over unencrypted http without authentication.\n",
+    );
 }
 
 export async function loadCredentials(): Promise<Credentials> {
@@ -176,18 +230,17 @@ export async function loadCredentials(): Promise<Credentials> {
     const credentials = JSON.parse(
       await readFile(join(storageDirectory("config"), "credentials.json"), "utf8"),
     );
-    if (typeof credentials.apiKey !== "string" || !credentials.apiKey.trim()) {
-      throw new CliError("Invalid credentials. Run jg auth again.");
-    }
     const provider = Object.hasOwn(credentials, "provider") ? credentials.provider : "vercel";
     if (!isCredentialProvider(provider)) throw new CliError("Invalid provider. Run jg auth again.");
-    const apiKey = validateKey(credentials.apiKey);
+    const insecure = provider === customProviderId && credentials.insecure === true;
+    const apiKey = validateKey(credentials.apiKey, insecure);
     if (provider === customProviderId) {
       return {
         provider,
-        baseURL: validateBaseURL(credentials.baseURL),
+        baseURL: validateBaseURL(credentials.baseURL, { insecure }),
         model: validateModel(credentials.model),
         apiKey,
+        ...(insecure ? { insecure: true } : {}),
       };
     }
     return { provider, apiKey };
@@ -195,6 +248,11 @@ export async function loadCredentials(): Promise<Credentials> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new CliError("Run jg auth or use jg auth --provider NAME --stdin.");
     }
+    const message = error instanceof Error ? error.message : "";
+    if (message.startsWith("Base URL must use https://"))
+      throw new CliError(`${message} Re-run jg auth with --insecure to trust this endpoint.`);
+    if (message.startsWith("Base URL") || message.startsWith("Provide a base URL"))
+      throw new CliError(`Saved base URL is invalid. ${message} Run jg auth again.`);
     throw new CliError("Could not read valid credentials. Run jg auth again.");
   }
 }

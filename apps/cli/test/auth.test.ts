@@ -231,9 +231,139 @@ testInDocker(
       const doctor = await run(["doctor"]);
       expect(doctor.code).toBe(1);
       expect(doctor.stderr).toBe("");
-      expect(doctor.stdout).toContain("Could not read valid credentials");
+      expect(doctor.stdout).toContain("Base URL must use https://");
+      expect(doctor.stdout).toContain("--insecure");
       expect(doctor.stdout).not.toContain("stored-endpoint-secret");
       expect(doctor.stdout).not.toContain("gateway.example.com");
+    });
+  },
+);
+
+testInDocker(
+  "insecure custom auth saves an empty key and doctor sends no auth header",
+  async () => {
+    const requests: Array<{
+      path: string;
+      authorization: string | null;
+      body: Record<string, unknown>;
+    }> = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        requests.push({
+          path: new URL(request.url).pathname,
+          authorization: request.headers.get("authorization"),
+          body: (await request.json()) as Record<string, unknown>,
+        });
+        return Response.json({ answers: { relevant: { type: "noul", noul: 0.9 } } });
+      },
+    });
+    try {
+      await withCli(async ({ home, run }) => {
+        const baseURL = `http://127.0.0.1:${server.port}/typesafe/v1`;
+        const auth = await run(
+          [
+            "auth",
+            "--provider",
+            "custom",
+            "--base-url",
+            baseURL,
+            "--model",
+            "gateway/jev-2",
+            "--insecure",
+            "--stdin",
+          ],
+          "",
+        );
+        expect(auth.code).toBe(0);
+        expect(auth.stderr).toBe("");
+        expect(auth.stdout).toContain(`Custom endpoint (127.0.0.1:${server.port}, insecure)`);
+        expect(auth.stdout).toContain("key saved");
+        expect(auth.stdout).toContain("Warning:");
+        expect(auth.stdout).toContain("unencrypted");
+        const file = join(home, "jevgrep", "credentials.json");
+        expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+          provider: "custom",
+          baseURL,
+          model: "gateway/jev-2",
+          apiKey: "",
+          insecure: true,
+        });
+        if (posix) {
+          expect((await stat(file)).mode & 0o777).toBe(0o600);
+          expect((await stat(join(home, "jevgrep"))).mode & 0o777).toBe(0o700);
+        }
+        expect(requests).toHaveLength(0);
+
+        const doctor = await run(["doctor"]);
+        expect(doctor.code).toBe(0);
+        expect(doctor.stderr).toBe("");
+        expect(doctor.stdout).toContain(`Custom endpoint (127.0.0.1:${server.port}, insecure)`);
+        expect(requests).toHaveLength(1);
+        expect(requests[0]!.path).toBe("/typesafe/v1/systemone");
+        expect(requests[0]!.authorization).toBeNull();
+        expect(requests[0]!.body.model).toBe("gateway/jev-2");
+      });
+    } finally {
+      server.stop(true);
+    }
+  },
+);
+
+testInDocker(
+  "insecure opt-in is custom-only and strict auth still rejects empty keys",
+  async () => {
+    await withCli(async ({ home, run }) => {
+      const file = join(home, "jevgrep", "credentials.json");
+      const preset = await run(
+        ["auth", "--provider", "vercel", "--insecure", "--stdin"],
+        "preset-secret\n",
+      );
+      expect(preset.code).toBe(1);
+      expect(preset.stderr).toBe("");
+      expect(preset.stdout).toContain("--insecure is only valid with --provider custom");
+      expect(preset.stdout).not.toContain("preset-secret");
+      const empty = await run(
+        [
+          "auth",
+          "--provider",
+          "custom",
+          "--base-url",
+          "https://gateway.example.com/v1",
+          "--model",
+          "jev",
+          "--stdin",
+        ],
+        "\n",
+      );
+      expect(empty.code).toBe(1);
+      expect(empty.stderr).toBe("");
+      expect(empty.stdout).toContain("non-empty API key");
+      expect(await readFile(file, "utf8").catch(() => null)).toBeNull();
+
+      const saved = await run(
+        [
+          "auth",
+          "--provider",
+          "custom",
+          "--base-url",
+          "http://192.168.0.135:8080/v1",
+          "--model",
+          "jev",
+          "--insecure",
+          "--stdin",
+        ],
+        "",
+      );
+      expect(saved.code).toBe(0);
+      expect(saved.stderr).toBe("");
+      expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+        provider: "custom",
+        baseURL: "http://192.168.0.135:8080/v1",
+        model: "jev",
+        apiKey: "",
+        insecure: true,
+      });
     });
   },
 );
