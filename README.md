@@ -142,7 +142,10 @@ relative to the root, for example `--exclude '**/*.test.ts' --exclude 'src/gener
 Re-running auth replaces that setup; searches always use the saved provider.
 `jg doctor` checks it with synthetic input. Existing saved keys without a provider
 remain Vercel keys. Environment-based credentials and endpoint overrides are not
-used; run `jg auth` if you previously relied on them.
+used; run `jg auth` if you previously relied on them. Custom endpoints may opt in
+to a trusted plain-`http://` private endpoint with `jg auth --provider custom
+--insecure`; that record sends source content unencrypted and unauthenticated,
+and every other record keeps the strict https-only rule.
 Evaluation answers are cached locally by default. The CLI writes its output to
 stdout and does not create report files. Use `jg --help` for cache controls,
 search overrides, and incomplete-result behavior.

@@ -49,6 +49,9 @@ A downstream closed pipe ends quietly without an error stack or continued calls.
 
 Credentials use the XDG config location and owner-only permissions. Auth saves
 one provider/key record; custom providers also save their base URL and model.
+A custom record may carry an explicit `"insecure": true` opt-in that permits a
+plain `http://` endpoint and an empty key (then no `Authorization` header is
+sent); absent or false keeps the strict https rule and the non-empty key.
 Search and doctor use only that record. Environment credentials and routing
 values do not override it. Trim surrounding key whitespace and reject internal
 whitespace; never echo keys in output or provider errors. Auth saves without a
