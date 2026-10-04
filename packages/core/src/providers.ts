@@ -35,6 +35,7 @@ export type ProviderSelection = {
   provider: CredentialProvider;
   baseURL?: string;
   model?: string;
+  insecure?: boolean;
 };
 
 export function isProviderId(value: unknown): value is ProviderId {
@@ -47,7 +48,7 @@ export function isCredentialProvider(value: unknown): value is CredentialProvide
 
 const loopbackHosts = new Set(["localhost", "127.0.0.1"]);
 
-export function validateBaseURL(value: unknown): string {
+export function validateBaseURL(value: unknown, options: { insecure?: boolean } = {}): string {
   if (typeof value !== "string" || !value.trim())
     throw new Error("Provide a base URL for the custom endpoint.");
   const baseURL = value.trim();
@@ -59,7 +60,7 @@ export function validateBaseURL(value: unknown): string {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:")
     throw new Error("Base URL must be an absolute http(s) URL.");
-  if (url.protocol === "http:" && !loopbackHosts.has(url.hostname))
+  if (url.protocol === "http:" && !options.insecure && !loopbackHosts.has(url.hostname))
     throw new Error(
       "Base URL must use https:// (http:// is allowed only for localhost or 127.0.0.1).",
     );
@@ -69,6 +70,17 @@ export function validateBaseURL(value: unknown): string {
   return baseURL;
 }
 
+/** True when the value is a plain http URL on a non-loopback host, i.e. needs the insecure opt-in. */
+export function requiresInsecure(value: unknown): boolean {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" && !loopbackHosts.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function validateModel(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || /\s/.test(value.trim()))
     throw new Error("Provide one non-empty model ID without whitespace.");
@@ -76,9 +88,12 @@ export function validateModel(value: unknown): string {
 }
 
 function customEndpoint(selection: ProviderSelection): ProviderEndpoint {
-  const baseURL = validateBaseURL(selection.baseURL);
+  const baseURL = validateBaseURL(selection.baseURL, { insecure: selection.insecure });
+  const host = new URL(baseURL).host;
   return {
-    label: `${customProviderLabel} (${new URL(baseURL).host})`,
+    label: selection.insecure
+      ? `${customProviderLabel} (${host}, insecure)`
+      : `${customProviderLabel} (${host})`,
     baseURL,
     model: validateModel(selection.model),
   };

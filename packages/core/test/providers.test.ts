@@ -4,6 +4,7 @@ import {
   endpointFor,
   isCredentialProvider,
   providers,
+  requiresInsecure,
   validateBaseURL,
   validateModel,
 } from "../src/providers";
@@ -49,6 +50,46 @@ test("base URLs require https except for loopback development proxies", () => {
     7,
   ])
     expect(() => validateBaseURL(value)).toThrow();
+});
+
+test("insecure mode allows plain http on any host but keeps every other rule", () => {
+  expect(validateBaseURL("http://192.168.0.135:8080/v1", { insecure: true })).toBe(
+    "http://192.168.0.135:8080/v1",
+  );
+  expect(validateBaseURL("http://gateway.example.com/v1", { insecure: true })).toBe(
+    "http://gateway.example.com/v1",
+  );
+  expect(() => validateBaseURL("http://192.168.0.135:8080/v1")).toThrow("https://");
+  expect(() => validateBaseURL("http://gateway.example.com/v1")).toThrow("https://");
+  for (const value of [
+    "ftp://gateway.example.com/v1",
+    "http://gateway.example.com/v1?api-version=1",
+    "http://gateway.example.com/v1#fragment",
+    "http://user:password@gateway.example.com/v1",
+    "gateway.example.com/v1",
+    "",
+  ])
+    expect(() => validateBaseURL(value, { insecure: true })).toThrow();
+  expect(requiresInsecure("http://192.168.0.135:8080/v1")).toBe(true);
+  expect(requiresInsecure("http://localhost:8080/v1")).toBe(false);
+  expect(requiresInsecure("https://gateway.example.com/v1")).toBe(false);
+  expect(requiresInsecure("ftp://gateway.example.com/v1")).toBe(false);
+  expect(requiresInsecure(undefined)).toBe(false);
+});
+
+test("insecure custom endpoints resolve with an insecure label", () => {
+  expect(
+    endpointFor({
+      provider: "custom",
+      baseURL: "http://192.168.0.135:8080/v1",
+      model: "gateway/jev-2",
+      insecure: true,
+    }),
+  ).toEqual({
+    label: "Custom endpoint (192.168.0.135:8080, insecure)",
+    baseURL: "http://192.168.0.135:8080/v1",
+    model: "gateway/jev-2",
+  });
 });
 
 test("model IDs must be non-empty and free of whitespace", () => {
