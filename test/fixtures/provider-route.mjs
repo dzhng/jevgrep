@@ -8,6 +8,7 @@ const endpoints = new Set([
 export function routeProviderFetch(originalFetch, origin) {
   return async (input, init) => {
     const url = new URL(input);
+    if (url.origin === origin) return originalFetch(input, init);
     if (!endpoints.has(url.href)) throw new Error(`Unexpected provider destination: ${url.href}`);
     const headers = new Headers(init?.headers);
     headers.set("x-jevgrep-original-url", url.href);
