@@ -465,3 +465,51 @@ test("valid UTF-8 control-byte binary and invalid UTF-8 remain excluded under ev
     await reader.close();
   }
 });
+
+test("credential-shaped tokens and .env-suffixed names stay out of the defaults", async () => {
+  // Assembled at runtime so the literal credential shapes never appear verbatim
+  // in committed source (secret scanners match the raw text).
+  const token = (...parts: string[]) => parts.join("");
+  const root = await fixture({
+    "prod.env": "DB_PASSWORD=secret\n",
+    "keys.env": `STRIPE_SECRET_KEY=${token("sk", "_live_", "51H8xTQrpLmNoPqRsTuVwx")}\n`,
+    "settings.json": `{"env": {"OPENAI_API_KEY": "${token("sk", "-proj-", "4xY9AbCdEfGhIjKlMnOpQrStUvWxYz0123456789")}"}}\n`,
+    "config.toml": `api_key = "${token("gh", "p_", "0123456789abcdefghijklmnopqrstuvwxyzAB")}"\n`,
+    "keys.json": `{"key": "${token("AI", "za", "0123456789abcdefghijklmnopqrstuvwxyza")}"}\n`,
+    "aws.txt": `aws_access_key_id = ${token("AK", "IA", "IOSFODNN7EXAMPLE")}\n`,
+    "slack.ts": `const token = "${token("xo", "xb-", "123456789-abcdefghijklmnop")}";\n`,
+    "gitlab.txt": `token = "${token("gl", "pat-", "AbCdEfGhIjKlMnOpQrSt")}"\n`,
+    "github.txt": `token = "${token("github", "_pat_", "11AbCdEfGh_0123456789012345678901234567890123456789012345678901234567890123")}"\n`,
+    "prose.txt": "The sk- prefix alone is not a token, and AKIA12345 is too short to be one.\n",
+    "plain.ts": "export const answer = 42;\n",
+  });
+  const reader = await createFilesystem({ root });
+  try {
+    for (const path of ["prod.env", "keys.env"])
+      expect(await reader.readSnapshot(path)).toMatchObject({ status: "excluded", reason: "sensitive_name" });
+    for (const path of [
+      "settings.json",
+      "config.toml",
+      "keys.json",
+      "aws.txt",
+      "slack.ts",
+      "gitlab.txt",
+      "github.txt",
+    ])
+      expect(await reader.readSnapshot(path)).toMatchObject({ status: "excluded", reason: "api_key" });
+    expect(await reader.readSnapshot("prose.txt")).toMatchObject({ status: "ok" });
+    expect(await reader.readSnapshot("plain.ts")).toMatchObject({ status: "ok" });
+  } finally {
+    await reader.close();
+  }
+  const broad = await createFilesystem({
+    root,
+    policy: { hidden: true, noIgnore: true, includeDependencies: true, includeSensitive: true },
+  });
+  try {
+    for (const path of ["prod.env", "keys.env", "settings.json", "config.toml", "keys.json", "aws.txt"])
+      expect((await broad.readSnapshot(path)).status).toBe("ok");
+  } finally {
+    await broad.close();
+  }
+});

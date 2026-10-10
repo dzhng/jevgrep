@@ -119,10 +119,21 @@ function isSensitive(name: string) {
   return (
     lower === ".env" ||
     lower.startsWith(".env.") ||
+    lower.endsWith(".env") ||
     filesystemDefaults.sensitiveNames.includes(lower) ||
     filesystemDefaults.sensitiveSuffixes.some((suffix) => lower.endsWith(suffix))
   );
 }
+
+/**
+ * Token shapes that only credentials carry (dzhng/jevgrep#51): a provider key pasted into an ordinary
+ * `settings.json` or `config.toml` leaves by the same door a private-key block does. Every alternative keeps a
+ * minimum length past its prefix so prose and identifiers do not trip it; the prefixes are the ones providers
+ * document (OpenAI `sk-`, Stripe `sk_live_`, GitHub `ghp_` / `github_pat_`, GitLab `glpat-`, Slack `xox`,
+ * AWS `AKIA` + 16, Google `AIza` + 35). The filter is still not a guarantee, only a narrower gap.
+ */
+const apiKeyPattern =
+  /(?:sk-[A-Za-z0-9_-]{20,}|sk_live_[A-Za-z0-9]{16,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|glpat-[A-Za-z0-9_-]{20,}|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{35})/;
 
 /** One invocation-scoped owner for eligibility, metadata reads, enumeration and content snapshots. */
 export async function createFilesystem(options: FilesystemOptions) {
@@ -378,6 +389,7 @@ export async function createFilesystem(options: FilesystemOptions) {
     }
     if (!policy.includeSensitive && /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/.test(source))
       return excluded("private_key");
+    if (!policy.includeSensitive && apiKeyPattern.test(source)) return excluded("api_key");
     return {
       status: "ok",
       snapshot: Object.freeze({
