@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 import { parseCommand } from "../src/args";
 
+test("search can omit declaration locations without changing policy", () => {
+  expect(parseCommand(["question", "--no-locations"])).toMatchObject({
+    kind: "search",
+    noLocations: true,
+    policy: {},
+  });
+});
+
 test("search accepts independent policy flags and a dash-prefixed root after --", () => {
   expect(
     parseCommand([

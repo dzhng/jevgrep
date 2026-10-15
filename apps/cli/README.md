@@ -94,7 +94,8 @@ Rerunning after the connection recovers retries failed work while reusing valid
 answers; `--no-cache` additionally bypasses those valid cached answers.
 
 The summary comes first, followed by file and declaration locations and selected
-source. Locations are reading leads, not a checklist. Omitted excerpts are marked;
+source. Use `--no-locations` when the trailing declaration section is not useful to
+your agent. Locations are reading leads, not a checklist. Omitted excerpts are marked;
 `--max-source-bytes 0` includes all selected source. An incomplete result can still
 be useful. Read what it supplies, then fill specific gaps with ordinary tools.
 Application output goes to stdout; `jg` does not create a report file.

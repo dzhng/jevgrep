@@ -16,6 +16,7 @@ export function renderResult(
   result: RetrievalResult,
   maxSourceBytes = DEFAULT_MAX_SOURCE_BYTES,
   maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
+  includeLocations = true,
 ): string {
   let remaining = maxSourceBytes || Infinity;
   const files = [...result.files]
@@ -60,7 +61,7 @@ export function renderResult(
     ...files.flatMap(({ file, excerpts, omitted }) => [
       `- ${quote(file.path)} — ${file.roles.join(", ") || "relevant; role uncertain"}; ${excerpts.length ? "source below" : omitted ? "source omitted" : "locations only"}`,
     ]),
-    "End file list. Declaration locations follow source.",
+    includeLocations ? "End file list. Declaration locations follow source." : "End file list.",
   ];
   for (const { file, excerpts } of files)
     for (const { range, source, partial, sourceByteStart, sourceByteEnd } of excerpts) {
@@ -87,19 +88,21 @@ export function renderResult(
       for (const line of sourceLines) lines.push(line);
       lines.push(fence);
     }
-  lines.push("", "Declaration locations:");
-  for (const { file, omitted } of files) {
-    lines.push(
-      `- ${quote(file.path)}`,
-      ...[...file.leads]
-        .sort((a, b) => a.range.startLine - b.range.startLine)
-        .map((lead) => `  ${lead.name}@${lead.range.startLine}-${lead.range.endLine}`),
-      ...(file.callLeads ?? []).map(
-        (call) =>
-          `  Possible local call ${call.caller} -> ${call.name}: lines ${call.range.startLine}-${call.range.endLine}${call.unknownEarlierBases.length ? `; earlier base(s) ${call.unknownEarlierBases.map(quote).join(", ")} not inspected` : ""}; runtime dispatch not verified.`,
-      ),
-      ...(omitted ? ["  Some source omitted; locations remain available."] : []),
-    );
+  if (includeLocations) {
+    lines.push("", "Declaration locations:");
+    for (const { file, omitted } of files) {
+      lines.push(
+        `- ${quote(file.path)}`,
+        ...[...file.leads]
+          .sort((a, b) => a.range.startLine - b.range.startLine)
+          .map((lead) => `  ${lead.name}@${lead.range.startLine}-${lead.range.endLine}`),
+        ...(file.callLeads ?? []).map(
+          (call) =>
+            `  Possible local call ${call.caller} -> ${call.name}: lines ${call.range.startLine}-${call.range.endLine}${call.unknownEarlierBases.length ? `; earlier base(s) ${call.unknownEarlierBases.map(quote).join(", ")} not inspected` : ""}; runtime dispatch not verified.`,
+        ),
+        ...(omitted ? ["  Some source omitted; locations remain available."] : []),
+      );
+    }
   }
   const output = lines.join("\n") + "\n\nEnd context.\n";
   const outputBytes = Buffer.byteLength(output);

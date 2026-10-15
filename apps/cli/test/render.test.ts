@@ -45,6 +45,13 @@ test("source precedes detailed locations and remains verbatim", () => {
   expect(output.endsWith("\nEnd context.\n")).toBe(true);
 });
 
+test("declaration locations can be omitted while source remains available", () => {
+  const output = renderResult(result(), 0, 0, false);
+  expect(output).toContain('Source block "one.py"');
+  expect(output).toContain("End file list.\n");
+  expect(output).not.toContain("Declaration locations:");
+});
+
 test("explicit byte limits preserve all locations and mark omissions without clipping UTF-8", () => {
   const value = result();
   value.files.push({
