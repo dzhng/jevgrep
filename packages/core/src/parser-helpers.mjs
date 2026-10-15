@@ -432,7 +432,7 @@ export async function execute(helper, input) {
       data.query.normalize("NFKC").match(/[_\p{ID_Start}][_\p{ID_Continue}]*/gu) ?? [],
     );
     let matches = [];
-    if (/\.pyi?$/.test(data.path) && Buffer.byteLength(data.text) > data.budget)
+    if (data.language === "python" && Buffer.byteLength(data.text) > data.budget)
       matches = await parse(data.text, (root) => previewMatches(root, tokens));
     return preview(data, matches);
   }

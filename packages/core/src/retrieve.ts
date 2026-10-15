@@ -1,7 +1,7 @@
 import { basename, extname } from "node:path";
 import { createFilesystem, type Snapshot, type DirectoryEntry } from "./filesystem";
 import { type EvaluationRequest, EvaluationFailure } from "./evaluator";
-import { inspect, pythonPreview, sourceForUnit, splitSource } from "./source";
+import { inspect, pythonPreview, resolveLanguage, sourceForUnit, splitSource } from "./source";
 import {
   navigationRequest,
   fileAssessmentRequest,
@@ -304,6 +304,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
     return buffered({ ...item, childPreview: preview }, sources);
   }
   async function previewFile(source: Snapshot): Promise<FilePreview> {
+    const language = resolveLanguage(source.path, source.source);
     const bytes = Buffer.from(source.source);
     let text = new TextDecoder("utf8", { fatal: true }).decode(bytes.subarray(0, 16384), {
       stream: bytes.length > 16384,
@@ -326,7 +327,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
       declarations: [],
       declarationIndexTruncated: false,
     };
-    if (truncated && /\.pyi?$/.test(source.path) && bytes.length <= 1_000_000) {
+    if (truncated && language === "python" && bytes.length <= 1_000_000) {
       const sampled = await pythonPreview(source, input.query, 16384, input.signal);
       if (
         sampled?.truncated &&
@@ -339,11 +340,7 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
         preview.range = "sampled source ranges";
       }
     }
-    if (
-      truncated &&
-      /\.(?:pyi?|[cm]?[jt]s|[jt]sx|go|rs)$/.test(source.path) &&
-      bytes.length <= 1_000_000
-    ) {
+    if (truncated && language !== undefined && bytes.length <= 1_000_000) {
       const syntax = await inspect(source, {
         signal: input.signal,
         maxUnitBytes: Math.max(4, bytes.length),

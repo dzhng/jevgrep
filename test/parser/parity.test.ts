@@ -34,7 +34,13 @@ test("Python declaration, preview, neighborhood and inherited-call outputs match
             ? source
             : JSON.stringify(
                 helper === "preview"
-                  ? { path: "x.py", text: source, query: "target first K", budget: 600 }
+                  ? {
+                      path: "x.py",
+                      language: "python",
+                      text: source,
+                      query: "target first K",
+                      budget: 600,
+                    }
                   : {
                       source,
                       ranges: [

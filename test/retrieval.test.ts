@@ -1,12 +1,88 @@
 import { renderResult } from "../apps/cli/src/render";
 import { routeProviderFetch } from "./fixtures/provider-route.mjs";
-import { expect } from "bun:test";
+import { expect, test } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testIfDocker } from "./helpers/docker";
 import { retrieve } from "../packages/core/src/retrieve";
 import { createEvaluator, EvaluationFailure } from "../packages/core/src/evaluator";
+
+test("extensionless scripts preserve extension-based provider contents and returned evidence", async () => {
+  for (const [extension, shebang, body] of [
+    [
+      ".py",
+      "#!/usr/bin/env -S python3 -u",
+      'class Base:\n    def helper(self):\n        return "🙂"\nclass Child(Base):\n    def test_target(self):\n        assert self.helper() == "🙂"\n',
+    ],
+    [".js", "#!/usr/bin/env node", 'function target() {\n  return "🙂";\n}\n'],
+  ]) {
+    const root = await mkdtemp(join(tmpdir(), "jg-shebang-"));
+    const padding = `${extension === ".py" ? "#" : "//"} ${"padding ".repeat(12)}\n`;
+    const source = `${shebang}\n${padding.repeat(200)}${body}`;
+    const runs = [];
+    try {
+      for (const path of [`tool${extension}`, "tool"]) {
+        const requests: string[] = [];
+        await writeFile(join(root, path), source);
+        const signal = new AbortController().signal;
+        const result = await retrieve(
+          { root, query: "test_target target", signal },
+          createEvaluator({
+            provider: "vercel",
+            apiKey: "fixture",
+            signal,
+            fetch: async (_input, init) => {
+              const request = String(init?.body);
+              requests.push(request);
+              const body = JSON.parse(request) as {
+                questions: Record<string, { instructions: string }>;
+              };
+              return Response.json({
+                answers: Object.fromEntries(
+                  Object.entries(body.questions).map(([id, question]) => [
+                    id,
+                    {
+                      type: "noul",
+                      noul: question.instructions.includes("(Base.helper,") ? 0.1 : 0.95,
+                    },
+                  ]),
+                ),
+              });
+            },
+          }),
+        );
+        expect(result.status).toBe("complete");
+        expect(requests.join("\n")).toContain(`"extension":"${path === "tool" ? "" : extension}"`);
+        runs.push({
+          requests: requests.map((request) =>
+            request
+              .replaceAll(`tool${extension}`, "tool")
+              .replaceAll(`"extension":"${extension}"`, '"extension":""'),
+          ),
+          files: JSON.parse(JSON.stringify(result.files).replaceAll(`tool${extension}`, "tool")),
+        });
+        await rm(join(root, path));
+      }
+      expect(runs[0]!.requests.join("\n")).toContain('"name":');
+      if (extension === ".py") {
+        expect(runs[0]!.requests.join("\n")).toContain('"range":"sampled source ranges"');
+        expect(runs[0]!.requests.join("\n")).toContain('"candidates":');
+        expect(runs[0]!.files[0].callLeads).toEqual([
+          {
+            caller: "Child.test_target",
+            name: "Base.helper",
+            range: { startLine: 203, endLine: 204 },
+            unknownEarlierBases: [],
+          },
+        ]);
+      }
+      expect(runs[1]).toEqual(runs[0]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
 
 testIfDocker(
   "hierarchical retrieval returns source from multiple files without uploading excluded data",

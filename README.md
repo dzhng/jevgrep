@@ -89,7 +89,8 @@ list.
 
 The summary and compact file list come first, followed by selected source with
 line references, then detailed declaration and call locations. Python, TypeScript/JavaScript, Go and Rust support declaration
-parsing; other text uses a fallback. The output is evidence for the agent to use,
+parsing, with extensionless Python and Node scripts recognised by their shebang;
+other text uses a fallback. The output is evidence for the agent to use,
 not a generated answer or a guarantee that every relevant file was found.
 [See a recorded output example](specs/done/jevgrep/assets/stdout-example.txt).
 
