@@ -412,6 +412,29 @@ test("installed local commands match the package without credentials", async (t)
   const version = await fixture.run(["--version"], noCredentials);
   assert.equal(version.code, 0, version.stdout);
   assert.equal(version.stdout, `${metadata.version}\n`);
+  await mkdir(join(fixture.tree, "config"));
+  await writeFile(join(fixture.tree, "terraform.tfvars"), "db_password = synthetic");
+  await writeFile(join(fixture.tree, "config/database.yml"), "password: synthetic");
+  await writeFile(join(fixture.tree, "line\nbreak\u001b[31m.ts"), "export const x = 1;");
+  const summary = await fixture.run(["files", fixture.tree], noCredentials);
+  assert.equal(summary.code, 0, summary.stdout);
+  assert.doesNotMatch(summary.stdout, /terraform\.tfvars|config\/database\.yml/);
+  const listed = await fixture.run(["files", fixture.tree, "--list"], noCredentials);
+  assert.equal(listed.code, 0, listed.stdout);
+  assert.match(listed.stdout, /^- "terraform\.tfvars"$/m);
+  assert.match(listed.stdout, /^- "config\/database\.yml"$/m);
+  assert.ok(listed.stdout.includes('- "line\\nbreak\\u001b[31m.ts"'));
+  assert.ok(!listed.stdout.includes("\u001b"));
+  assert.equal(
+    listed.stdout.split("Eligible paths:")[0],
+    summary.stdout.split("\n\nEnd files.")[0] + "\n",
+  );
+  const narrowed = await fixture.run(
+    ["files", fixture.tree, "--list", "--exclude", "*.tfvars", "--exclude", "config/"],
+    noCredentials,
+  );
+  assert.equal(narrowed.code, 0, narrowed.stdout);
+  assert.doesNotMatch(narrowed.stdout, /terraform\.tfvars|config\/database\.yml/);
   assert.equal(
     await readFile(join(packageDirectory, "dist/skills/jevgrep/SKILL.md"), "utf8"),
     await readFile(expectedSkill, "utf8"),

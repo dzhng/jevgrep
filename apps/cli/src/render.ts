@@ -140,7 +140,7 @@ function size(bytes: number): string {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-/** Counts only; listing every eligible path would flood stdout on real repositories. */
+/** Keep the default summary compact; paths are retained only for an explicit listing. */
 export function renderInventory(inventory: Inventory, maxDirectories = 20): string {
   const count = (value: number) => value.toLocaleString("en-US");
   const files = (value: number) => `${count(value)} ${value === 1 ? "file" : "files"}`;
@@ -166,6 +166,11 @@ export function renderInventory(inventory: Inventory, maxDirectories = 20): stri
       ? [
           `- ${count(inventory.directories.length - maxDirectories)} more ${inventory.directories.length - maxDirectories === 1 ? "directory" : "directories"}`,
         ]
+      : []),
+    ...(inventory.paths
+      ? inventory.paths.length
+        ? ["Eligible paths:", ...inventory.paths.map((path) => `- ${quote(path)}`)]
+        : ["Eligible paths: none."]
       : []),
   ];
   return lines.join("\n") + "\n\nEnd files.\n";
