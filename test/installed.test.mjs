@@ -62,6 +62,7 @@ async function context(t, mode = "healthy", executable = binary) {
   let expectedQuery = query;
   let expectedProvider = "vercel";
   let expectedKey = fixtureKey;
+  let expectedCustom = null;
   const secrets = new Set([fixtureKey]);
   const scratch = await mkdtemp(join(tmpdir(), "jg-installed-"));
   const tree = join(scratch, "repository");
@@ -115,13 +116,24 @@ async function context(t, mode = "healthy", executable = binary) {
   server = createServer((request, response) => {
     void (async () => {
       assert.equal(request.method, "POST");
-      const preset = providers[expectedProvider];
-      assert.equal(request.url, new URL(preset.url).pathname);
-      assert.equal(request.headers["x-jevgrep-original-url"], preset.url);
-      assert.ok(
-        request.headers.authorization === `Bearer ${expectedKey}`,
-        "Saved key must authenticate the request",
-      );
+      const preset = expectedCustom ? null : providers[expectedProvider];
+      if (expectedCustom) {
+        assert.equal(request.url, expectedCustom.pathname);
+        if (expectedCustom.key)
+          assert.equal(request.headers.authorization, `Bearer ${expectedCustom.key}`);
+        else
+          assert.ok(
+            !request.headers.authorization,
+            "An empty insecure key must send no Authorization header",
+          );
+      } else {
+        assert.equal(request.url, new URL(preset.url).pathname);
+        assert.equal(request.headers["x-jevgrep-original-url"], preset.url);
+        assert.ok(
+          request.headers.authorization === `Bearer ${expectedKey}`,
+          "Saved key must authenticate the request",
+        );
+      }
       assert.match(request.headers["content-type"] ?? "", /^application\/json/);
       const chunks = [];
       let bytes = 0;
@@ -134,7 +146,7 @@ async function context(t, mode = "healthy", executable = binary) {
       assert.ok(!raw.includes(forbidden), "Ignored/hidden source reached the provider");
       const body = JSON.parse(raw);
       assert.deepEqual(Object.keys(body).sort(), ["model", "questions", "state"]);
-      assert.equal(body.model, preset.model);
+      assert.equal(body.model, expectedCustom ? expectedCustom.model : preset.model);
       assert.equal(
         typeof body.state,
         "object",
@@ -324,6 +336,12 @@ async function context(t, mode = "healthy", executable = binary) {
       expectedProvider = provider;
       expectedKey = key;
       secrets.add(key);
+    },
+    expectCustom(pathname, model, key = "") {
+      expectedCustom = { pathname, model, key };
+    },
+    get origin() {
+      return `http://127.0.0.1:${server.address().port}`;
     },
     async removeCredentials() {
       await rm(credentials, { force: true });
@@ -1336,4 +1354,39 @@ test("installed invalid auth preserves saved bytes and leaves no temporary crede
     assert.deepEqual(await readdir(fixture.credentialDirectory), ["credentials.json"]);
   }
   assert.equal(fixture.requests.length, 0);
+});
+
+test("installed insecure custom endpoint saves an empty key and searches without an auth header", async (t) => {
+  const fixture = await context(t);
+  const baseURL = `${fixture.origin}/v1`;
+  fixture.expectCustom("/v1/systemone", "jev-fixture");
+  const auth = await fixture.run(
+    [
+      "auth",
+      "--provider",
+      "custom",
+      "--base-url",
+      baseURL,
+      "--model",
+      "jev-fixture",
+      "--insecure",
+      "--stdin",
+    ],
+    {},
+    false,
+    "\n",
+  );
+  assert.equal(auth.code, 0, auth.stdout);
+  assert.match(auth.stdout, /insecure/);
+  assert.match(auth.stdout, /Warning:/);
+  assert.deepEqual(JSON.parse(await readFile(fixture.credentials, "utf8")), {
+    provider: "custom",
+    baseURL,
+    model: "jev-fixture",
+    apiKey: "",
+    insecure: true,
+  });
+  const result = await fixture.run([query, fixture.tree, "--no-cache"]);
+  complete(result);
+  assert.ok(fixture.requests.length > 0, "The insecure custom endpoint received no requests");
 });

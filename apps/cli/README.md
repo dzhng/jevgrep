@@ -38,13 +38,26 @@ jg auth --provider custom --base-url https://gateway.example.com/typesafe/v1 --m
 ```
 
 Custom endpoints must use `https://`; `http://localhost` and `http://127.0.0.1`
-are accepted for a local proxy. Auth and doctor name only the endpoint host, never
-the key. The saved endpoint and model are part of the cache identity, so custom
-answers stay separate from the preset providers’ answers and from other endpoints.
+are accepted for a local proxy. For a trusted private endpoint that only speaks
+plain `http://`, pass `--insecure` (custom endpoints only; interactive auth asks
+for confirmation instead):
+
+```sh
+jg auth --provider custom --base-url http://192.168.0.135:8080/v1 --model gateway/jev-2 --insecure --stdin
+```
+
+The saved record then carries `"insecure": true`, an empty API key is accepted,
+and no `Authorization` header is sent. Traffic and retrieved source content then
+travel to that host unencrypted and unauthenticated, so only opt in for endpoints
+you control. Records without the flag keep the strict https-only rule and a
+non-empty key. Auth and doctor name only the endpoint host, never the key. The
+saved endpoint and model are part of the cache identity, so custom answers stay
+separate from the preset providers’ answers and from other endpoints.
 
 A custom base URL must contain only the scheme, host, and optional path: no
 embedded credentials, query string, or fragment. Jevgrep appends `/systemone` to
-that base URL and sends the saved key as a Bearer token.
+that base URL and sends the saved key as a Bearer token, except for an insecure
+record with an empty key, which sends no `Authorization` header.
 
 For gateway implementers, Jevgrep's boolean questions arrive as `noul` questions
 **without `criteria`**. A minimal request and response are:

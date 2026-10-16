@@ -38,6 +38,7 @@ export function parseCommand(args: string[]): Command {
         provider: { type: "string" },
         "base-url": { type: "string" },
         model: { type: "string" },
+        insecure: { type: "boolean" },
         agent: { type: "string", multiple: true },
         global: { type: "boolean" },
         yes: { type: "boolean" },
@@ -66,11 +67,25 @@ export function parseCommand(args: string[]): Command {
   if (first === "auth") {
     if (
       positionals.length !== 1 ||
-      keys.some((key) => !["stdin", "provider", "base-url", "model"].includes(key))
+      keys.some((key) => !["stdin", "provider", "base-url", "model", "insecure"].includes(key))
     )
       throw new CliError("Usage: jg auth OR jg auth --provider NAME --stdin");
+    if (values.insecure && values.provider !== undefined && values.provider !== customProviderId)
+      throw new CliError("--insecure is only valid with --provider custom.");
     if (!keys.length) return { kind: "auth" };
-    if (!values.stdin || !isCredentialProvider(values.provider))
+    if (!values.stdin) {
+      if (
+        values.insecure &&
+        values.provider === undefined &&
+        values["base-url"] === undefined &&
+        values.model === undefined
+      )
+        return { kind: "auth", insecure: true };
+      throw new CliError(
+        `Use auth --provider ${credentialProviders.join("|")} --stdin for a piped key.`,
+      );
+    }
+    if (!isCredentialProvider(values.provider))
       throw new CliError(
         `Use auth --provider ${credentialProviders.join("|")} --stdin for a piped key.`,
       );
@@ -82,6 +97,7 @@ export function parseCommand(args: string[]): Command {
         provider: customProviderId,
         baseURL: values["base-url"],
         model: values.model,
+        ...(values.insecure ? { insecure: true } : {}),
       };
     }
     if (values["base-url"] !== undefined || values.model !== undefined)
@@ -125,7 +141,9 @@ export function parseCommand(args: string[]): Command {
     !first?.trim() ||
     positionals.length > 2 ||
     values.stdin ||
-    keys.some((key) => ["agent", "global", "yes", "provider", "base-url", "model"].includes(key))
+    keys.some((key) =>
+      ["agent", "global", "yes", "provider", "base-url", "model", "insecure"].includes(key),
+    )
   )
     throw new CliError('Usage: jg "question" [root]. Run jg --help.');
   let concurrency: number | undefined;
@@ -216,11 +234,13 @@ Commands:
 
 Auth automation:
   auth --provider ${credentialProviders.join("|")} --stdin
-  auth --provider custom --base-url URL --model ID --stdin
+  auth --provider custom --base-url URL --model ID [--insecure] --stdin
   Save one provider/key from a pipe. Re-running auth replaces your setup.
   Custom endpoints must use https://; http:// is allowed only for localhost
-  and 127.0.0.1. Auth and doctor name the endpoint host, never the key.
-  Saved credentials only; provider key/URL environment variables are ignored.
+  and 127.0.0.1, or with --insecure for a trusted private endpoint (custom
+  only, also permits an empty key; traffic then travels unencrypted). Auth
+  and doctor name the endpoint host, never the key. Saved credentials only;
+  provider key/URL environment variables are ignored.
 
 Skill installation options:
   --agent NAME    Target an agent (repeat for multiple agents)

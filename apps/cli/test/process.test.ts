@@ -43,6 +43,7 @@ testInDockerPosix("interactive auth hides input and exits 130 on interruption", 
     for (const mode of [
       "save",
       "custom-save",
+      "insecure-custom-save",
       "interrupt-provider",
       "interrupt-key",
       "cancel-provider",
@@ -81,6 +82,16 @@ try:
         os.write(master, b"gateway/jev-2\\r")
         wait_for(b"API key")
         os.write(master, b"pty-fixture-secret\\r")
+    elif mode == "insecure-custom-save":
+        os.write(master, b"\\x1b[B\\x1b[B\\x1b[B\\x1b[B\\r")
+        wait_for(b"Base URL")
+        os.write(master, b"http://192.168.0.135:8080/v1\\r")
+        wait_for(b"Use it anyway")
+        os.write(master, b"y\\r")
+        wait_for(b"Model ID")
+        os.write(master, b"gateway/jev-2\\r")
+        wait_for(b"API key")
+        os.write(master, b"\\r")
     else:
         if not mode.endswith("provider"):
             os.write(master, b"\\x1b[B\\x1b[B\\r")
@@ -113,7 +124,7 @@ finally:
         { env: { ...process.env, HOME: home, XDG_CONFIG_HOME: home } },
       );
       const result = JSON.parse(stdout);
-      const saved = mode === "save" || mode === "custom-save";
+      const saved = mode === "save" || mode === "custom-save" || mode === "insecure-custom-save";
       expect(result.code).toBe(saved ? 0 : 130);
       expect(result.stderr).toBe("");
       expect(result.stdout + result.echo).not.toContain("pty-fixture-secret");
@@ -135,6 +146,16 @@ finally:
           apiKey: "pty-fixture-secret",
         });
         expect(result.stdout).toContain("Custom endpoint (127.0.0.1:8080)");
+      } else if (mode === "insecure-custom-save") {
+        expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+          provider: "custom",
+          baseURL: "http://192.168.0.135:8080/v1",
+          model: "gateway/jev-2",
+          apiKey: "",
+          insecure: true,
+        });
+        expect(result.stdout).toContain("Custom endpoint (192.168.0.135:8080, insecure)");
+        expect(result.stdout).toContain("Warning:");
       } else expect(await readFile(file, "utf8")).toBe(previous);
       expect(await readdir(join(home, "jevgrep"))).toEqual(["credentials.json"]);
     }

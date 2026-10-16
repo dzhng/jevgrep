@@ -6,6 +6,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 import { createRateBudget, estimatedInputTokens } from "./rate-budget";
 
+/** Placeholder handed to the SDK for an insecure empty key; never persisted or sent. */
+const insecurePlaceholder = "jg-insecure";
 export type EvaluationRequest = {
   state: Parameters<typeof evaluate>[0]["state"];
   questions: Record<string, { type: "boolean"; instructions: string }>;
@@ -33,6 +35,7 @@ export function createEvaluator(options: {
   apiKey: string;
   baseURL?: string;
   model?: string;
+  insecure?: boolean;
   cache?: ReturnType<typeof createEvaluationCache>;
   policyVersion?: string;
   fetch?: typeof fetch;
@@ -80,13 +83,19 @@ export function createEvaluator(options: {
     };
   }
   const provider = createTypeSafeAi({
-    apiKey: options.apiKey,
+    // The SDK requires a non-empty key; the fetch wrapper below drops the header for empty keys.
+    apiKey: options.apiKey || insecurePlaceholder,
     baseURL: endpoint.baseURL,
     fetch: async (input, init) => {
       assertActive();
       if (requests >= (options.requestLimit ?? 50_000))
         throw new EvaluationFailure("request-limit");
       requests++;
+      if (!options.apiKey && init) {
+        const headers = new Headers(init.headers);
+        headers.delete("authorization");
+        init = { ...init, headers };
+      }
       const response = await (options.fetch ?? fetch)(input, init);
       if (response.status === 429) {
         const raw = response.headers.get("retry-after");
@@ -217,7 +226,7 @@ export function createEvaluator(options: {
               throw new EvaluationFailure(
                 "authentication",
                 false,
-                providerDiagnostic(error, options.apiKey),
+                providerDiagnostic(error, options.apiKey || insecurePlaceholder),
               );
             }
             if (requests >= (options.requestLimit ?? 50_000))
@@ -233,7 +242,7 @@ export function createEvaluator(options: {
                 error.isRetryable);
             if (navigation && status === 429) attemptLimit = Math.max(attemptLimit, 2);
             if ((navigation && !transient) || attempt + 1 === attemptLimit) {
-              const diagnostic = providerDiagnostic(error, options.apiKey);
+              const diagnostic = providerDiagnostic(error, options.apiKey || insecurePlaceholder);
               const description = diagnostic
                 ? `HTTP ${diagnostic.statusCode}${diagnostic.message ? `: ${diagnostic.message}` : ""}`
                 : name === "TimeoutError"

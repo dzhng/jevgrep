@@ -116,6 +116,38 @@ test("custom auth carries an explicit base URL and model while presets reject th
     expect(() => parseCommand(args)).toThrow();
 });
 
+test("insecure is a custom-only auth opt-in", () => {
+  expect(
+    parseCommand([
+      "auth",
+      "--provider",
+      "custom",
+      "--base-url",
+      "http://192.168.0.135:8080/v1",
+      "--model",
+      "jev",
+      "--insecure",
+      "--stdin",
+    ]),
+  ).toEqual({
+    kind: "auth",
+    provider: "custom",
+    baseURL: "http://192.168.0.135:8080/v1",
+    model: "jev",
+    insecure: true,
+  });
+  expect(parseCommand(["auth", "--insecure"])).toEqual({ kind: "auth", insecure: true });
+  for (const args of [
+    ["auth", "--provider", "vercel", "--insecure", "--stdin"],
+    ["auth", "--provider", "typesafe", "--base-url", "http://host/v1", "--insecure", "--stdin"],
+    ["auth", "--provider", "custom", "--base-url", "http://host/v1", "--insecure"],
+    ["question", "--insecure"],
+    ["doctor", "--insecure"],
+    ["files", ".", "--insecure"],
+  ])
+    expect(() => parseCommand(args)).toThrow();
+});
+
 test("concurrency is a positive search-only limit and does not change cache policy", () => {
   const command = parseCommand(["question", "--concurrency", "2"]);
   expect(command).toMatchObject({ kind: "search", concurrency: 2, policy: {} });
