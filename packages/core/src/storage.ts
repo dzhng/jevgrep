@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 /** The one source of Jevgrep's config and cache locations; filesystem policy protects the same paths. */
 export function storageDirectory(
@@ -8,7 +8,7 @@ export function storageDirectory(
   platform: NodeJS.Platform = process.platform,
 ) {
   const xdg = kind === "config" ? env.XDG_CONFIG_HOME : env.XDG_CACHE_HOME;
-  if (xdg) return join(xdg, "jevgrep");
+  if (xdg && isAbsolute(xdg)) return join(xdg, "jevgrep");
   if (platform === "win32") {
     const base = kind === "config" ? env.APPDATA : env.LOCALAPPDATA;
     return join(

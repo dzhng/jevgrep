@@ -11,6 +11,23 @@ test("XDG locations win on every platform", () => {
   }
 });
 
+test("relative XDG locations are ignored on every platform", () => {
+  const env = {
+    XDG_CONFIG_HOME: "relative/config",
+    XDG_CACHE_HOME: "../cache",
+    APPDATA: "/roaming",
+    LOCALAPPDATA: "/local",
+  };
+  for (const platform of ["linux", "darwin", "win32"] as const) {
+    expect(storageDirectory("config", env, platform)).toBe(
+      join(platform === "win32" ? "/roaming" : join(homedir(), ".config"), "jevgrep"),
+    );
+    expect(storageDirectory("cache", env, platform)).toBe(
+      join(platform === "win32" ? "/local" : join(homedir(), ".cache"), "jevgrep"),
+    );
+  }
+});
+
 test("Windows uses APPDATA for config and LOCALAPPDATA for cache", () => {
   const env = { APPDATA: "/roaming", LOCALAPPDATA: "/local" };
   expect(storageDirectory("config", env, "win32")).toBe(join("/roaming", "jevgrep"));
