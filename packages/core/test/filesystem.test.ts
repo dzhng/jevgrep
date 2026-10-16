@@ -19,6 +19,114 @@ async function fixture(files: Record<string, string | Uint8Array>) {
   return root;
 }
 
+test("env-suffixed files are excluded case-insensitively at any depth", async () => {
+  const root = await fixture({
+    "keys.env": "ROOT_ENV_FIXTURE",
+    "nested/prod.env": "NESTED_ENV_FIXTURE",
+    "nested/foo.ENV": "UPPERCASE_ENV_FIXTURE",
+    "source.ts": "export const visible = true;\n",
+  });
+  const reader = await createFilesystem({ root });
+  try {
+    for (const path of ["keys.env", "nested/prod.env", "nested/foo.ENV"])
+      expect(await reader.readSnapshot(path)).toMatchObject({
+        status: "excluded",
+        reason: "sensitive_name",
+      });
+    expect((await reader.listPage()).entries.map((entry) => entry.path).sort()).toEqual([
+      "nested",
+      "source.ts",
+    ]);
+    expect((await reader.listPage("nested")).entries).toEqual([]);
+  } finally {
+    await reader.close();
+  }
+});
+
+test("hidden env files require independent hidden and sensitive overrides", async () => {
+  const root = await fixture({
+    ".env": "DOT_ENV_FIXTURE",
+    ".env.local": "LOCAL_ENV_FIXTURE",
+    "keys.env": "SUFFIX_ENV_FIXTURE",
+  });
+  for (const policy of [
+    {},
+    { hidden: true },
+    { includeSensitive: true },
+    { hidden: true, includeSensitive: true },
+  ]) {
+    const reader = await createFilesystem({ root, policy });
+    try {
+      expect((await reader.readSnapshot("keys.env")).status).toBe(
+        "includeSensitive" in policy ? "ok" : "excluded",
+      );
+      for (const path of [".env", ".env.local"])
+        expect((await reader.readSnapshot(path)).status).toBe(
+          "hidden" in policy && "includeSensitive" in policy ? "ok" : "excluded",
+        );
+    } finally {
+      await reader.close();
+    }
+  }
+});
+
+test("env-like and ordinary configuration filenames remain eligible", async () => {
+  const paths = [
+    "keys.env.example",
+    "config.env.json",
+    "settings.json",
+    "config.toml",
+    "keys.json",
+  ];
+  const root = await fixture(
+    Object.fromEntries(paths.map((path) => [path, "CONFIGURATION_FIXTURE"])),
+  );
+  const reader = await createFilesystem({ root });
+  try {
+    for (const path of paths)
+      expect(await reader.readSnapshot(path)).toMatchObject({
+        status: "ok",
+        snapshot: { path, source: "CONFIGURATION_FIXTURE" },
+      });
+    expect((await reader.listPage()).entries.map((entry) => entry.path).sort()).toEqual(
+      paths.sort(),
+    );
+  } finally {
+    await reader.close();
+  }
+});
+
+test("env-suffixed directories are pruned unless sensitive paths are included", async () => {
+  const root = await fixture({
+    "samples.env/fixture.ts": "export const sample = true;\n",
+    "source.ts": "export const visible = true;\n",
+  });
+  const reader = await createFilesystem({ root });
+  try {
+    expect((await reader.listPage()).entries.map((entry) => entry.path)).toEqual(["source.ts"]);
+    expect((await reader.listPage("samples.env")).entries).toEqual([]);
+    expect(await reader.readSnapshot("samples.env/fixture.ts")).toMatchObject({
+      status: "excluded",
+      reason: "sensitive_name",
+    });
+  } finally {
+    await reader.close();
+  }
+  const included = await createFilesystem({ root, policy: { includeSensitive: true } });
+  try {
+    expect((await included.listPage()).entries.map((entry) => entry.path).sort()).toEqual([
+      "samples.env",
+      "source.ts",
+    ]);
+    expect(await included.readSnapshot("samples.env/fixture.ts")).toMatchObject({
+      status: "ok",
+      snapshot: { path: "samples.env/fixture.ts", source: "export const sample = true;\n" },
+    });
+  } finally {
+    await included.close();
+  }
+});
+
 test("one reader excludes ignored, hidden, dependent, sensitive and binary content from plain roots", async () => {
   const root = await fixture({
     ".gitignore": "ignored.txt\n",

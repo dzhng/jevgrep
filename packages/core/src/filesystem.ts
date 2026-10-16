@@ -62,7 +62,7 @@ export const filesystemDefaults = Object.freeze({
     ".npmrc",
     ".pypirc",
   ] as readonly string[],
-  sensitiveSuffixes: [".pem", ".key", ".p12", ".pfx"] as readonly string[],
+  sensitiveSuffixes: [".env", ".pem", ".key", ".p12", ".pfx"] as readonly string[],
   pageSize: 128,
   maxOpenDirectories: 64,
   maxFileBytes: 16 * 1024 * 1024,

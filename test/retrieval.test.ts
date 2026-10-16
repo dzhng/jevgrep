@@ -9,6 +9,113 @@ import { retrieve } from "../packages/core/src/retrieve";
 import { createEvaluator, EvaluationFailure } from "../packages/core/src/evaluator";
 
 testIfDocker(
+  "env-suffixed files never reach the provider by default",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-env-suffix-"));
+    const sent: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as { questions: Record<string, unknown> };
+        sent.push(JSON.stringify(body));
+        return Response.json({
+          answers: Object.fromEntries(
+            Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.9 }]),
+          ),
+        });
+      },
+    });
+    try {
+      await writeFile(join(root, "keys.env"), "FIXTURE_VALUE=ENV_SUFFIX_EXCLUDED_FILE_MARKER\n");
+      await writeFile(
+        join(root, "source.ts"),
+        'export const sourceMarker = "ENV_SUFFIX_NORMAL_SOURCE_MARKER";\n',
+      );
+      const signal = new AbortController().signal;
+      const evaluator = createEvaluator({
+        apiKey: "fixture",
+        provider: "vercel",
+        fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+        signal,
+      });
+      const result = await retrieve({ root, query: "find fixture source", signal }, evaluator);
+      expect(result.status).toBe("complete");
+      expect(sent.length).toBeGreaterThan(0);
+      expect(result.counts.requests).toBe(sent.length);
+      expect(sent.join("\n")).toContain("ENV_SUFFIX_NORMAL_SOURCE_MARKER");
+      expect(sent.join("\n")).not.toContain("ENV_SUFFIX_EXCLUDED_FILE_MARKER");
+      expect(result.files.map((file) => file.path)).toEqual(["source.ts"]);
+    } finally {
+      server.stop(true);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+testIfDocker(
+  "sensitive overrides admit env suffixes without bypassing explicit excludes",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-env-override-"));
+    const sent: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as { questions: Record<string, unknown> };
+        sent.push(JSON.stringify(body));
+        return Response.json({
+          answers: Object.fromEntries(
+            Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.9 }]),
+          ),
+        });
+      },
+    });
+    try {
+      await writeFile(join(root, "keys.env"), "FIXTURE_VALUE=ENV_SUFFIX_OVERRIDE_MARKER\n");
+      for (const path of [".env", ".env.local"])
+        await writeFile(join(root, path), "FIXTURE_VALUE=ENV_SUFFIX_HIDDEN_MARKER\n");
+      await writeFile(
+        join(root, "source.ts"),
+        'export const sourceMarker = "ENV_OVERRIDE_NORMAL_SOURCE_MARKER";\n',
+      );
+      for (const policy of [
+        { includeSensitive: true },
+        { includeSensitive: true, exclude: ["keys.env"] },
+      ]) {
+        sent.length = 0;
+        const signal = new AbortController().signal;
+        const evaluator = createEvaluator({
+          apiKey: "fixture",
+          provider: "vercel",
+          fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+          signal,
+        });
+        const result = await retrieve(
+          { root, query: "find fixture source", policy, signal },
+          evaluator,
+        );
+        expect(result.status).toBe("complete");
+        expect(sent.length).toBeGreaterThan(0);
+        expect(result.counts.requests).toBe(sent.length);
+        expect(sent.join("\n")).toContain("ENV_OVERRIDE_NORMAL_SOURCE_MARKER");
+        expect(sent.join("\n")).not.toContain("ENV_SUFFIX_HIDDEN_MARKER");
+        if (policy.exclude) {
+          expect(sent.join("\n")).not.toContain("ENV_SUFFIX_OVERRIDE_MARKER");
+          expect(result.files.map((file) => file.path)).toEqual(["source.ts"]);
+        } else {
+          expect(sent.join("\n")).toContain("ENV_SUFFIX_OVERRIDE_MARKER");
+          expect(result.files.map((file) => file.path).sort()).toEqual(["keys.env", "source.ts"]);
+        }
+      }
+    } finally {
+      server.stop(true);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+testIfDocker(
   "hierarchical retrieval returns source from multiple files without uploading excluded data",
   async () => {
     const root = await mkdtemp(join(tmpdir(), "jg-tree-"));

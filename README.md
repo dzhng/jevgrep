@@ -138,6 +138,12 @@ filtering flags as search.
 To skip paths inside that root for one search, pass `--exclude` with a gitignore pattern
 relative to the root, for example `--exclude '**/*.test.ts' --exclude 'src/generated/'`.
 
+The default credential-name filter excludes `.env`, `.env.*`, and path components
+ending in `.env`, case-insensitively. This includes files such as `keys.env` and
+directories such as `samples.env` and their contents. Use `--include-sensitive`
+to include them; hidden paths also need `--hidden`. Explicit `--exclude` patterns
+still apply.
+
 `jg auth` asks for your provider, then saves its key in an owner-only config file.
 Re-running auth replaces that setup; searches always use the saved provider.
 `jg doctor` checks it with synthetic input. Existing saved keys without a provider
