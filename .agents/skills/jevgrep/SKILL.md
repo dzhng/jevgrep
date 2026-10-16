@@ -26,6 +26,22 @@ jg "How are telemetry events recorded and sent?" .
 
 Pass a natural-language question and an optional search root. The root defaults
 to the current directory; a narrower folder limits the search to that subtree.
+
+### Phrasing Queries
+
+Frame questions around **behavior, lifecycle, and system interactions** (how, where,
+why, or what triggers a behavior). Jevgrep evaluates semantic relevance to find entry
+points across unfamiliar files:
+
+- **Effective queries (behavioral & explanatory):**
+  - `"Where is authentication checked before a request reaches a handler?"`
+  - `"How are database connections created, pooled, and closed?"`
+  - `"Which tests cover retry behavior when a request times out?"`
+- **Avoid keyword or symbol lookups:**
+  - Do not pass isolated keywords or symbol names (e.g. `"auth"` or `"AuthHandler"`).
+    Use `grep`, `ripgrep`, or code definitions instead.
+  - Do not ask for file listings or paths; use `jg files` or filesystem search.
+
 When the root is large or its scope is unclear, run `jg files [root]` before
 searching. It reports file/byte totals and top-level directory groups without
 credentials or provider requests; it does not read source content. Counts are an
