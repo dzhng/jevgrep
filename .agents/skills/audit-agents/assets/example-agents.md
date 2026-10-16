@@ -28,6 +28,8 @@ Write the test first. Before changing behaviour or fixing a bug, invoke <skill: 
 
 A change that shouldn't alter behaviour (a refactor, a performance change) must leave the output unchanged, or be a named decision.
 
+A failure you see is yours to fix, whether or not your change caused it. Fix an unrelated failure in its own commit.
+
 Never loosen a requirement to make a check pass. A narrow pass proves a narrow claim: say what you verified, what you assumed and what is unfinished.
 
 Don't wait on a long run. Start it in the background and keep working. Give it a visible sign of progress and a point where you stop, and never repeat a failure unchanged.

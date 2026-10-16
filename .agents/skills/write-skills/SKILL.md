@@ -19,9 +19,10 @@ will do.
    the body.
 
 2. **Spend tokens like they are scarce.** Assume the agent is already good at
-   general reasoning. Keep only non-obvious workflow, domain constraints,
-   tool choices, failure modes, and validation rules. Delete background,
-   motivation, and generic advice.
+   general reasoning. State the direction and let smart models figure out
+   implementation details. A wrapper skill can be two sentences: name the
+   capability to use and the skill to follow. Add mechanics only when a
+   demonstrated failure requires them.
 
 3. **Write procedures, not essays.** Prefer imperative rules, decision
    points, and small examples. A good skill changes behavior in the next

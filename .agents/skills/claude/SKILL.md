@@ -1,6 +1,6 @@
 ---
 name: claude
-description: Use Claude Code as an independent `claude -p` subagent when the user explicitly asks for Claude, wants a second-agent opinion from Claude, or asks to delegate a well-scoped task to Claude. Supports selecting `--model` and thinking/effort level with defaults of `opus` and `high`.
+description: Use Claude Code as an independent `claude -p` subagent when the user explicitly asks for Claude, wants a second-agent opinion from Claude, or asks to delegate a well-scoped task to Claude. Supports selecting `--model` and thinking/effort level with defaults of the current `opus` alias and `high`.
 ---
 
 # Claude
@@ -13,10 +13,13 @@ contract narrow.
 ## Defaults
 
 Use `claude -p --model opus --effort high` unless the user or task calls for a
-different model or thinking level.
+different model or thinking level. Keep `opus` as an alias so Claude Code
+resolves the current Opus release; do not pin a dated model ID in this skill.
 
-- **Model:** accept aliases such as `opus`, `sonnet`, or `fable`, or a full
-  model name. Default `opus`.
+- **Model:** prefer aliases such as `opus`, `sonnet`, or `fable`, which follow
+  the current Claude releases. Accept a full model name only when the user or
+  task requires that specific model, and verify it is current first. Default
+  `opus`.
 - **Thinking level:** pass Claude Code's `--effort` flag. Valid levels are
   `low`, `medium`, `high`, `xhigh`, and `max`. Default `high`.
 - **Cost guard:** for exploratory asks, add `--max-budget-usd <amount>` when
@@ -63,7 +66,17 @@ the user explicitly asks it to edit.
    output, or labelled inferences.
 2. Prefer a read-only tool surface for reviews:
    `--tools "Read,Grep,Glob,Bash" --permission-mode dontAsk`.
-3. Triage every finding against the code before acting. Report what Claude
+3. **Never grant fewer tools than your output contract requires.** Read your
+   own prompt and ask which tool produces each claim you demanded. A judge that
+   cannot run a command will still answer a question posed in numbers — with
+   numbers, self-consistent and measured from nothing, and with the artifacts
+   it says it wrote. Trimming the tool surface does not make the answer
+   cautious; it makes the fabrication harder to spot. Either grant the tool or
+   stop asking for the claim.
+4. Require the receipt with the number: any quantity in the response must
+   arrive with the command that produced it and that command's output. Findings
+   that fail this are struck, not discounted.
+5. Triage every finding against the code before acting. Report what Claude
    flagged, what you accepted, and what you dismissed.
 
 ## Implementation — explicit ask only
@@ -106,9 +119,12 @@ classify the failure before retrying.
 
 ## Rules
 
-- Use `claude -p --model opus --effort high` as the default invocation.
+- Use `claude -p --model opus --effort high` as the default invocation; keep
+  the alias unversioned so it follows the current Opus release.
 - Let the user override model and effort in plain language; translate that to
   `--model` and `--effort`.
 - Keep Claude's writes out of the working tree unless delegation was explicit.
 - Do not touch the same working tree while Claude is making edits.
 - Treat Claude output as evidence to verify, not authority to relay.
+- Match the tool surface to the output contract; a claim shape you granted no
+  tool for comes back invented.

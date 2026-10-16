@@ -14,6 +14,9 @@ judgment.
 - Supply full frames and matched detail crops including surrounding space.
   Withhold previous verdicts, implementation details and the author's preferred
   answer; do not withhold the target needed to judge fidelity.
+- Give it a shell only if you want numbers back. Images alone buy a description;
+  a judge asked for measurements it has no way to take answers in the register
+  the question was posed in and invents them.
 
 ## Prompt
 
@@ -32,7 +35,8 @@ Compare Image A and Image B. Report:
    feature it crosses. Report local discrepancies even if everything is legible.
 4. Give a per-feature reference observation → candidate observation →
    pass/fix/uncertain record. Distinguish solid/core edges from faint fringe;
-   measure endpoints and gaps relative to visible anchors. Verify crops include
+   locate endpoints and gaps relative to visible anchors, in words unless you
+   quote the command and output that measured them. Verify crops include
    the entire feature. Request paired effect-on/off captures when background
    texture makes extent ambiguous. A small discrepancy still needs resolution;
    do not label it acceptable merely because the whole looks similar.
@@ -42,6 +46,12 @@ Compare Image A and Image B. Report:
 When an approved reference is identified, judge fidelity to it. Otherwise do not
 assume either image is the target. Overall attractiveness does not excuse a
 local mismatch. Judge only from visible pixels and supplied design requirements.
+
+Describe what you see in words. State no pixel value, luminance, percentage,
+ratio, count, or offset unless you ran a command that produced it and you quote
+that command and its output beside the number. "Image B reads clearly darker
+along the lower edge" is a finding; a luminance mean you did not measure is a
+fabrication.
 ```
 
 ## How To Use The Result
@@ -49,6 +59,10 @@ local mismatch. Judge only from visible pixels and supplied design requirements.
 - Treat the subagent result as independent evidence about which image is less
   wrong, not a replacement for metrics or your own inspection — and not a vote
   for whichever image is the baseline.
+- Run the returned review through the receipts checker that ships with
+  `screenshot-critique` before you read it, and strike whatever it flags. An
+  unsupported number reads as the strongest evidence in the review precisely
+  because it is numeric, so it has to be removed before it can persuade you.
 - If the subagent flags wrong camera, mismatched state, missing content, or
   visible artifacts, fix capture/rendering quality before judging the rest.
 - Preserve the findings, not just the headline verdict. A “pass” accompanied

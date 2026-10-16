@@ -1,6 +1,6 @@
 ---
 name: refactor-clean
-description: Refactor cleanly instead of layering sediment. Use for rename requests, stale or misleading names, changed scope, or when a change reveals duplicated concepts, local adapters, obsolete owners, redundant inputs or guards, compatibility wrappers, parallel abstractions, an over-large module that has accreted many responsibilities, or "just tack this on" pressure in any code area.
+description: Refactor cleanly instead of layering sediment. Use for rename requests, stale or misleading names, legacy leftovers, changed scope, or when a change reveals duplicated concepts, local adapters, obsolete owners, redundant inputs or guards, compatibility wrappers, parallel abstractions, an over-large module that has accreted many responsibilities, or "just tack this on" pressure in any code area.
 ---
 
 # Clean Refactoring
@@ -24,8 +24,8 @@ module into the several owners it was hiding.
    state machine, data contract, renderer phase, API shape, UI state, or test
    oracle.
 3. Find every current owner and consumer. Treat wrappers, aliases, pass-local
-   constants, copied structs, and "temporary" branches as sediment until proven
-   otherwise.
+   constants, copied structs, migration comments and "temporary" branches as
+   sediment until proven otherwise.
 4. Run a deletion pass before relaxing checks or making inputs optional. For each
    input, flag, guard, fallback, and adapter in the affected path, ask what required
    behavior breaks if it disappears. Trace its writers, transport, readers,
