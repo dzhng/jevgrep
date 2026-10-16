@@ -79,6 +79,45 @@ testInDocker("installed auth saves privately, bounds stdin, and never echoes key
   });
 });
 
+for (const [label, input] of [
+  ["NUL", "invalid-fake\0secret\n"],
+  ["non-Latin-1", "invalid-fake☃secret\n"],
+  ["control character", "invalid-fake\x01secret\n"],
+  ["DEL", "invalid-fake\x7fsecret\n"],
+  ["malformed UTF-8", Buffer.concat([Buffer.from("invalid-fake"), Buffer.from([0xff])])],
+] as const) {
+  testInDocker(`auth rejects ${label} without replacing saved credentials`, async () => {
+    await withCli(async ({ home, run }) => {
+      const directory = join(home, "jevgrep");
+      const file = join(directory, "credentials.json");
+      const original = '{ "provider": "vercel", "apiKey": "existing-fake-secret" }\n';
+      await mkdir(directory, { recursive: true });
+      await writeFile(file, original);
+      const result = await run(["auth", "--provider", "vercel", "--stdin"], input);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("API key");
+      expect(result.stdout).not.toContain("invalid-fake");
+      expect(result.stdout).not.toContain("existing-fake-secret");
+      expect(await readFile(file, "utf8")).toBe(original);
+    });
+  });
+}
+
+testInDocker("auth accepts a Latin-1 key and trims surrounding whitespace", async () => {
+  await withCli(async ({ home, run }) => {
+    const key = "fake-latin-é-secret";
+    const result = await run(["auth", "--provider", "vercel", "--stdin"], ` \t${key}\r\n`);
+    expect(result).toMatchObject({ code: 0, stderr: "" });
+    expect(result.stdout).toContain("key saved");
+    expect(result.stdout).not.toContain(key);
+    expect(JSON.parse(await readFile(join(home, "jevgrep", "credentials.json"), "utf8"))).toEqual({
+      provider: "vercel",
+      apiKey: key,
+    });
+  });
+});
+
 testInDocker(
   "custom auth saves the endpoint and doctor verifies it without echoing the key",
   async () => {

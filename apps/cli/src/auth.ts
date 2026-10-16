@@ -1,6 +1,7 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { validateHeaderValue } from "node:http";
 import { isCancel, password, select, text } from "@clack/prompts";
 import {
   customProviderId,
@@ -20,6 +21,11 @@ function validateKey(raw: string): string {
   const key = raw.trim();
   if (!key || /\s/.test(key) || Buffer.byteLength(key) > 8192) {
     throw new CliError("Provide one non-empty API key without whitespace (maximum 8 KiB).");
+  }
+  try {
+    validateHeaderValue("Authorization", `Bearer ${key}`);
+  } catch {
+    throw new CliError("Provide an API key containing only valid HTTP header characters.");
   }
   return key;
 }
