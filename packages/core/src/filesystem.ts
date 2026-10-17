@@ -4,6 +4,7 @@ import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import ignore, { type Ignore } from "ignore";
 import { storageDirectory } from "./storage";
+import { containsLikelySecret } from "./secrets";
 
 /** These independent switches broaden only their named exclusion category. */
 export type FilesystemPolicy = {
@@ -378,6 +379,8 @@ export async function createFilesystem(options: FilesystemOptions) {
     }
     if (!policy.includeSensitive && /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/.test(source))
       return excluded("private_key");
+    if (!policy.includeSensitive && containsLikelySecret(source))
+      return excluded("sensitive_content");
     return {
       status: "ok",
       snapshot: Object.freeze({
