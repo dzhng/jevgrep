@@ -45,6 +45,17 @@ test("source precedes detailed locations and remains verbatim", () => {
   expect(output.endsWith("\nEnd context.\n")).toBe(true);
 });
 
+test("no-locations omits the trailing declaration locations section", () => {
+  const output = renderResult(result(), 0, 0, true);
+  expect(output).not.toContain("Declaration locations");
+  expect(output).not.toContain("Declaration locations follow source");
+  expect(output).toContain("End file list.");
+  expect(output).toContain('- "one.py" — implementation; source below');
+  expect(output).toContain('Source block "one.py" lines 1-3:');
+  expect(output).not.toContain("behavior@2-3");
+  expect(output.endsWith("\nEnd context.\n")).toBe(true);
+});
+
 test("explicit byte limits preserve all locations and mark omissions without clipping UTF-8", () => {
   const value = result();
   value.files.push({
