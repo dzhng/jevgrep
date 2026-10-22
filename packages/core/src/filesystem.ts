@@ -3,11 +3,15 @@ import { constants, type BigIntStats, type Dir } from "node:fs";
 import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import ignore, { type Ignore } from "ignore";
+import { typeClassifier, type FileType, FileTypeError, isFileType } from "./file-types";
 import { storageDirectory } from "./storage";
 import { containsLikelySecret } from "./secrets";
 
-/** These independent switches broaden only their named exclusion category. */
+/** Shared eligibility controls for search, context donors, and the local file inventory. */
 export type FilesystemPolicy = {
+  /** An opt-in union of filename categories; exclusions always win. */
+  only?: readonly FileType[];
+  excludeTypes?: readonly FileType[];
   hidden?: boolean;
   noIgnore?: boolean;
   includeDependencies?: boolean;
@@ -115,6 +119,10 @@ function same(a: BigIntStats, b: BigIntStats) {
     a.ctimeNs === b.ctimeNs
   );
 }
+function canReuseIdentity(stat: BigIntStats, started: bigint) {
+  const { mtimeNs, ctimeNs } = stat;
+  return (mtimeNs > ctimeNs ? mtimeNs : ctimeNs) + recentChangeNs < started;
+}
 function within(root: string, path: string) {
   const rel = relative(root, path);
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
@@ -151,6 +159,8 @@ export async function createFilesystem(options: FilesystemOptions) {
     if (!Number.isSafeInteger(limits[name]) || limits[name] < 1)
       throw new Error(`Invalid filesystem limit: ${name}`);
   }
+  for (const types of [policy.only, policy.excludeTypes])
+    if (types?.some((type) => !isFileType(type))) throw new FileTypeError("Unknown file category.");
   const now = options.now ?? (() => Date.now());
   const protectedPaths = await Promise.all(
     [storageDirectory("config"), storageDirectory("cache"), ...(options.protectedPaths ?? [])].map(
@@ -303,6 +313,8 @@ export async function createFilesystem(options: FilesystemOptions) {
         currentRoot.dev !== rootStat.dev
       )
         return issue("changed", named.path);
+      const policyIssue = await checkPolicy();
+      if (policyIssue) return policyIssue;
       if (!components.length) return { status: "eligible", ...named, stat: currentRoot, ancestors };
       ancestors.push({ path: root, stat: currentRoot });
       for (let index = 0; index < components.length; index++) {
@@ -352,8 +364,14 @@ export async function createFilesystem(options: FilesystemOptions) {
         const rootRelative = components.slice(0, index + 1).join("/");
         if (excludeRules?.ignores(rootRelative + (stat.isDirectory() ? "/" : "")))
           return excluded("exclude_pattern");
-        if (index === components.length - 1)
+        if (index === components.length - 1) {
+          if (stat.isFile() && classify) {
+            const type = classify(named.path);
+            if ((policy.only && !policy.only.includes(type)) || policy.excludeTypes?.includes(type))
+              return excluded(`file_type:${type}`);
+          }
           return { status: "eligible", ...named, stat, ancestors };
+        }
         if (!stat.isDirectory()) return excluded("not_directory");
         ancestors.push({ path: absolute, stat });
         directory = absolute;
@@ -456,8 +474,7 @@ export async function createFilesystem(options: FilesystemOptions) {
       source,
       contentHash: createHash("sha256").update(read.bytes).digest("hex"),
     });
-    const { mtimeNs, ctimeNs } = admitted.stat;
-    if ((mtimeNs > ctimeNs ? mtimeNs : ctimeNs) + recentChangeNs < started)
+    if (canReuseIdentity(admitted.stat, started))
       retain(admitted.path, { snapshot, stat: admitted.stat, bytes: read.bytes.length });
     return { status: "ok", snapshot };
   }
@@ -560,6 +577,84 @@ export async function createFilesystem(options: FilesystemOptions) {
     reusableBytes = 0;
     await Promise.all([...cursors.keys()].map(discard));
   }
-  return { root, readSnapshot, lookupFile, listPage, closeCursor: discard, close };
+  // Load only for an explicit category filter, so unfiltered searches keep their existing policy.
+  let classify: ReturnType<typeof typeClassifier> | undefined;
+  let typeConfigStat: BigIntStats | undefined;
+  let typeConfigBytes: Buffer | undefined;
+  let typeConfigReusable = false;
+  async function checkPolicy(): Promise<Issue | undefined> {
+    if (!classify) return;
+    const path = ".jevgrep-types.json";
+    const absolute = join(root, path);
+    const started = BigInt(Math.floor(now())) * 1_000_000n;
+    try {
+      const current = await lstat(absolute, { bigint: true }).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        return undefined;
+      });
+      if (current ? !typeConfigStat || !same(current, typeConfigStat) : typeConfigStat)
+        return issue("changed", path);
+      if (
+        current &&
+        typeConfigReusable &&
+        !(await sameFile(
+          { status: "eligible", path, absolute, stat: current, ancestors: [] },
+          current,
+        ))
+      )
+        return issue("changed", path);
+      if (current && !typeConfigReusable) {
+        const result = await readBytes(
+          {
+            status: "eligible",
+            path,
+            absolute,
+            stat: current,
+            ancestors: [{ path: root, stat: rootStat }],
+          },
+          limits.maxIgnoreBytes,
+        );
+        if (result.status !== "ok") return result;
+        if (!result.bytes.equals(typeConfigBytes!)) return issue("changed", path);
+        typeConfigReusable = canReuseIdentity(current, started);
+      }
+    } catch (error) {
+      return issue(errorKind(error), path);
+    }
+  }
+  if (policy.only || policy.excludeTypes?.length) {
+    const name = ".jevgrep-types.json";
+    const absolute = join(root, name);
+    let source: string | undefined;
+    try {
+      const stat = await lstat(absolute, { bigint: true });
+      if (!stat.isFile() || stat.isSymbolicLink())
+        throw new FileTypeError(`${name} must be a regular file.`);
+      const started = BigInt(Math.floor(now())) * 1_000_000n;
+      const result = await readBytes(
+        {
+          status: "eligible",
+          path: name,
+          absolute,
+          stat,
+          ancestors: [{ path: root, stat: rootStat }],
+        },
+        limits.maxIgnoreBytes,
+      );
+      if (result.status !== "ok")
+        throw new FileTypeError(`Could not read ${name}; category filtering was not started.`);
+      source = new TextDecoder("utf-8", { fatal: true }).decode(result.bytes);
+      typeConfigStat = stat;
+      typeConfigBytes = result.bytes;
+      typeConfigReusable = canReuseIdentity(stat, started);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        if (error instanceof FileTypeError) throw error;
+        throw new FileTypeError(`Could not read ${name}; category filtering was not started.`);
+      }
+    }
+    classify = typeClassifier(source);
+  }
+  return { root, readSnapshot, lookupFile, listPage, checkPolicy, closeCursor: discard, close };
 }
 export type FilesystemReader = Awaited<ReturnType<typeof createFilesystem>>;

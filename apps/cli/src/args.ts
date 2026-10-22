@@ -1,3 +1,4 @@
+import { fileTypes, parseFileTypes } from "@repo/core/file-types";
 import { parseArgs } from "node:util";
 import type { SearchInput } from "@repo/core";
 import { providers, customProviderId, isCredentialProvider } from "@repo/core/providers";
@@ -53,6 +54,8 @@ export function parseCommand(args: string[]): Command {
         "include-dependencies": { type: "boolean" },
         "include-sensitive": { type: "boolean" },
         exclude: { type: "string", multiple: true },
+        only: { type: "string", multiple: true },
+        "exclude-types": { type: "string", multiple: true },
         list: { type: "boolean" },
       },
     });
@@ -117,6 +120,8 @@ export function parseCommand(args: string[]): Command {
             "include-dependencies",
             "include-sensitive",
             "exclude",
+            "only",
+            "exclude-types",
             "list",
           ].includes(key),
       )
@@ -188,6 +193,8 @@ export function parseCommand(args: string[]): Command {
 
 function policyFrom(values: {
   exclude?: string[];
+  only?: string[];
+  "exclude-types"?: string[];
   hidden?: boolean;
   "no-ignore"?: boolean;
   "include-dependencies"?: boolean;
@@ -212,6 +219,8 @@ function policyFrom(values: {
   if (values["include-dependencies"]) policy.includeDependencies = true;
   if (values["include-sensitive"]) policy.includeSensitive = true;
   if (excludes.length) policy.exclude = [...new Set(excludes)].sort();
+  if (values.only) policy.only = parseFileTypes(values.only);
+  if (values["exclude-types"]) policy.excludeTypes = parseFileTypes(values["exclude-types"]);
   return policy;
 }
 
@@ -254,9 +263,15 @@ Search options:
   --no-ignore             Disable .gitignore/.ignore patterns
   --include-dependencies  Include dependency and build directories
   --include-sensitive     Include known sensitive filenames/content
+  --only TYPES            Only these comma-separated file categories; repeatable
+  --exclude-types TYPES   Exclude these categories; exclusions win
   --exclude PATTERN       Skip paths matching a gitignore pattern; repeatable
   --no-cache              Disable cache reads and writes
   --concurrency N         Limit in-flight Jev requests; try 1–4 on slow networks
+
+File categories: ${fileTypes.join(", ")}. Classification uses filenames,
+with overrides from .jevgrep-types.json in the search root. Unknown files need
+--only unknown to join a restricted selection. Binary content is still excluded.
 
 Filesystem policy flags also apply to jg files.
 Use jg files [root] --list to show every eligible relative path, quoted and

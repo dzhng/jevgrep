@@ -82,6 +82,9 @@ Add `--list` to see the eligible relative paths, quoted and sorted. To remove a
 path you did not intend to send, repeat the preview with `--exclude` and use the
 same exclusions for the search. An incomplete preview lists only paths seen
 before the limit or interruption; search-time content checks can exclude more.
+Category filters also apply to this free preview. See
+[choosing a search scope](../../docs/file-types.md) for filename categories,
+repository overrides, and how to bound paid work.
 Evaluation answers are cached locally; `jg --help` describes cache controls.
 
 For a slow or unstable connection, try `jg "question" ./project --concurrency 4`

@@ -2,6 +2,7 @@ import { renderResult } from "../apps/cli/src/render";
 import { routeProviderFetch } from "./fixtures/provider-route.mjs";
 import { expect, spyOn, test } from "bun:test";
 import { mkdtemp, mkdir, open, writeFile, rm, utimes } from "node:fs/promises";
+import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testIfDocker } from "./helpers/docker";
@@ -802,3 +803,147 @@ testIfDocker(
     }
   },
 );
+
+test("file categories keep excluded names and content out of provider evaluation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jg-type-provider-"));
+  try {
+    await mkdir(join(root, "mixed"));
+    await writeFile(join(root, "mixed/main.ts"), "export const ready = true;\n");
+    await writeFile(join(root, "mixed/private-dataset.jsonl"), "DATA_SENTINEL_DO_NOT_SEND\n");
+    await writeFile(join(root, "mixed/runtime.log"), "LOG_SENTINEL_DO_NOT_SEND\n");
+    const sent: string[] = [];
+    const signal = new AbortController().signal;
+    const result = await retrieve(
+      { root, query: "ready", policy: { only: ["code"] }, signal },
+      createEvaluator({
+        provider: "typesafe",
+        apiKey: "fixture",
+        signal,
+        fetch: async (_input, init) => {
+          const request = String(init?.body);
+          sent.push(request);
+          const body = JSON.parse(request) as { questions: Record<string, unknown> };
+          return Response.json({
+            answers: Object.fromEntries(
+              Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.95 }]),
+            ),
+          });
+        },
+      }),
+    );
+    expect(result.status).toBe("complete");
+    expect(result.files.map((file) => file.path)).toEqual(["mixed/main.ts"]);
+    const payloads = sent.join("\n");
+    expect(payloads).toContain("main.ts");
+    for (const forbidden of [
+      "private-dataset.jsonl",
+      "runtime.log",
+      "DATA_SENTINEL_DO_NOT_SEND",
+      "LOG_SENTINEL_DO_NOT_SEND",
+    ])
+      expect(payloads).not.toContain(forbidden);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a changed category mapping stops queued source before further provider uploads", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jg-type-change-"));
+  try {
+    await writeFile(join(root, "main.ts"), "export const ready = true;\n");
+    const config = join(root, ".jevgrep-types.json");
+    await writeFile(config, '{"*.ts":"code"}');
+    const sent: string[] = [];
+    const signal = new AbortController().signal;
+    const result = await retrieve(
+      { root, query: "ready", policy: { only: ["code"] }, signal },
+      createEvaluator({
+        provider: "typesafe",
+        apiKey: "fixture",
+        signal,
+        fetch: async (_input, init) => {
+          const request = String(init?.body);
+          sent.push(request);
+          if (sent.length === 1) await writeFile(config, '{"*.ts":"data"}');
+          const body = JSON.parse(request) as { questions: Record<string, unknown> };
+          return Response.json({
+            answers: Object.fromEntries(
+              Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.95 }]),
+            ),
+          });
+        },
+      }),
+    );
+    expect(sent[0]).toContain("export const ready");
+    expect(sent.slice(1).join("\n")).not.toContain("export const ready");
+    expect(result.status).toBe("incomplete");
+    expect(result.files.flatMap((file) => file.excerpts)).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("category mapping invalidation also blocks queued filename-only navigation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jg-type-names-"));
+  let lstatSpy: ReturnType<typeof spyOn> | undefined;
+  try {
+    const config = join(root, ".jevgrep-types.json");
+    await writeFile(config, '{"*.ts":"code"}');
+    // More than one navigation batch, all built from directory metadata without source donors.
+    for (let index = 0; index < 129; index++) {
+      const directory = join(root, "parent", `group${index}`);
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        join(directory, `EXCLUDED_AFTER_CHANGE_${index}.ts`),
+        "export const ready = true;\n",
+      );
+    }
+    const seen = new Set<string>();
+    let previewsComplete!: () => void;
+    const previewsReady = new Promise<void>((resolve) => {
+      previewsComplete = resolve;
+    });
+    const originalLstat = fs.lstat;
+    lstatSpy = spyOn(fs, "lstat").mockImplementation(async (...args) => {
+      const result = await originalLstat(...args);
+      if (String(args[0]).includes("EXCLUDED_AFTER_CHANGE_")) {
+        seen.add(String(args[0]));
+        if (seen.size === 129) previewsComplete();
+      }
+      return result;
+    });
+    const sent: string[] = [];
+    const signal = new AbortController().signal;
+    const result = await retrieve(
+      { root, query: "ready", policy: { only: ["code"] }, signal },
+      createEvaluator({
+        provider: "typesafe",
+        apiKey: "fixture",
+        signal,
+        concurrency: 1,
+        fetch: async (_input, init) => {
+          const request = String(init?.body);
+          sent.push(request);
+          if (sent.length === 1) {
+            // Hold the first request until discovery has buffered the other previews.
+            await previewsReady;
+            await writeFile(config, '{"*.ts":"data"}');
+          }
+          const body = JSON.parse(request) as { questions: Record<string, unknown> };
+          return Response.json({
+            answers: Object.fromEntries(
+              Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.1 }]),
+            ),
+          });
+        },
+      }),
+    );
+    expect(sent[0]).toContain("EXCLUDED_AFTER_CHANGE_");
+    expect(sent[0]).not.toContain("export const ready");
+    expect(sent.slice(1).join("\n")).not.toContain("EXCLUDED_AFTER_CHANGE_");
+    expect(result.status).toBe("incomplete");
+  } finally {
+    lstatSpy?.mockRestore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
