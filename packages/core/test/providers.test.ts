@@ -9,8 +9,9 @@ import {
 } from "../src/providers";
 
 test("preset endpoints keep their existing label, base URL, and model", () => {
-  for (const provider of ["vercel", "typesafe", "openrouter", "opencode"] as const)
+  for (const provider of ["vercel", "typesafe", "openrouter", "opencode", "opencode-free"] as const)
     expect(endpointFor({ provider })).toEqual(providers[provider]);
+  expect(endpointFor({ provider: "opencode-free" }).model).toBe("jev-1.13-free");
 });
 
 test("custom endpoints resolve to the saved base URL, model, and visible host", () => {
