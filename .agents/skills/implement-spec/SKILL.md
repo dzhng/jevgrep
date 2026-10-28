@@ -68,12 +68,12 @@ depends on prior work.
    concepts, parallel abstractions, and compatibility wrappers it introduced
    collapse into the clean contract with one owner, so the code reads as designed
    today, not tacked on. Last, run
-   [audit-choices](../audit-choices/SKILL.md) on the cleaned pass — a pure
+   [audit-decisions](../audit-decisions/SKILL.md) on the cleaned pass — a pure
    audit that appends every decision made where the spec was silent (your own,
-   and each delegated subagent's when integrating) to the spec's choices
-   ledger (`specs/<feature>/choices.md`) with verdicts, changing no code
-   itself. You act on its findings: redo unsound choices from their corrected
-   decisions, adopt the recorded provisional call on any user-only entry — the
+   and each delegated subagent's when integrating) to the spec's decisions
+   ledger (`specs/<feature>/decisions.md`) with verdicts, changing no code
+   itself. You act on its findings: redo unsound decisions from the corrected
+   ones it records, adopt the recorded provisional call on any user-only entry — the
    audit never blocks the run. Rerun the affected checks, then commit only the
    focused changes from this pass.
 7. Update the spec README's "Next Agent Prompt": status, completed work, next
@@ -83,7 +83,7 @@ depends on prior work.
    Trigger it after a red pass, after every two or three slice commits, after a
    rebase/resume/compaction, before changing feature areas, when evidence
    invalidates the plan, when the handoff contradicts the TODO/graph, when the
-   choices ledger's entries cluster around one slice, or when the
+   decisions ledger's entries cluster around one slice, or when the
    active prompt grows hard to scan. Long specs bloat repeatedly; cleanup is a
    normal pass, not a cosmetic chore.
 
@@ -115,19 +115,19 @@ depends on prior work.
    that only reads wrong once every slice has landed, and docs that describe
    increments instead of the feature are visible at all. Apply the fixes, rerun
    the gates, commit.
-11. **Consolidate the choices ledger, then close.** When the last slice lands, the
-   `choices.md` you've been appending to per pass is build-order sediment: entries
+11. **Consolidate the decisions ledger, then close.** When the last slice lands, the
+   `decisions.md` you've been appending to per pass is build-order sediment: entries
    banked early carry "provisional — revisit in slice N" verdicts that a later pass
    silently resolved, entries a later pass reverted still sit there, and the same
-   choice may appear twice. The per-pass rule "banked is settled, never re-listed"
+   decision may appear twice. The per-pass rule "banked is settled, never re-listed"
    is what let that drift accumulate — so the final consolidation is its deliberate
-   exception. Before archiving, **rewrite `choices.md` from scratch** as the final
-   ledger: re-audit every banked choice against the **final shipped code** (not the
+   exception. Before archiving, **rewrite `decisions.md` from scratch** as the final
+   ledger: re-audit every banked decision against the **final shipped code** (not the
    pass it landed in), collapse each provisional/needs-later entry to its actual
    end state, drop anything a later pass superseded or reverted, and merge
-   duplicates. Keep it **choices only** — no gate results, e2e evidence, or
+   duplicates. Keep it **decisions only** — no gate results, e2e evidence, or
    review-finding narration; those are reported elsewhere and are not decisions the
-   user now owns. Present it per [audit-choices](../audit-choices/SKILL.md): grouped
+   user now owns. Present it per [audit-decisions](../audit-decisions/SKILL.md): grouped
    by verdict, ranked least-confident-first, every entry ELI5 and standalone.
    *Then* close the spec with [close-spec](../close-spec/SKILL.md).
 
@@ -211,11 +211,11 @@ fixes have landed, the handoff shows nothing left to pick up, and the spec has
 been archived with [close-spec](../close-spec/SKILL.md).
 Anything short of that is mid-implementation: keep going.
 
-The final handback presents the choices ledger, not the diff, per
-[audit-choices](../audit-choices/SKILL.md) — a days-long unsupervised run
+The final handback presents the decisions ledger, not the diff, per
+[audit-decisions](../audit-decisions/SKILL.md) — a days-long unsupervised run
 earns its merge through this ledger; it is the user's review surface for
 everything decided without them. Hand over the **consolidated** ledger from
-step 11 (final state, verified against shipped code, choices only), never the
+step 11 (final state, verified against shipped code, decisions only), never the
 raw per-pass append — a ledger still carrying "will be done in a later slice"
 verdicts tells the user you never went back to confirm it was.
 

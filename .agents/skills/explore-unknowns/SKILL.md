@@ -102,7 +102,7 @@ decision ledger.
   territory answered.
 - Close items as decisions, not discussions. Each resolved unknown ends as a
   one-line decision plus its why, phrased so the spec can carry it verbatim as
-  a given. Every choice a builder later invents unsupervised is an unknown
+  a given. Every decision a builder later invents unsupervised is an unknown
   this walk missed — a map that leaves the implementer deciding is incomplete.
 - Claims about the territory cite real files actually read; invented data is
   labeled as such. A fabricated specific destroys the map's authority.

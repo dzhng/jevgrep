@@ -177,7 +177,7 @@ whole feature is done.
    iterate on quickly. Keep the README's "Next Agent Prompt" written as the
    handoff text a future agent should read and follow.
 10. **Reslice when the work says so:** if implementation hits a snag and the slice
-   starts changing unrelated variables — or the choices ledger keeps filling
+   starts changing unrelated variables — or the decisions ledger keeps filling
    from one slice — stop broadening the patch. Update the spec
    first: split the slice into smaller contracts, name the frozen inputs, move the
    extra visual variables to later slices, and rewrite the Next Agent Prompt to
@@ -256,8 +256,8 @@ Each slice file answers:
 - What decisions are delegated to the implementer? Name the freedoms
   deliberately left open (internal structure, naming, reversible cosmetic
   calls). Everything else must be resolved by the slice: an unlisted decision
-  the implementer has to invent is a spec gap that lands in the choices ledger
-  ([audit-choices](../audit-choices/SKILL.md)), not implementer discretion.
+  the implementer has to invent is a spec gap that lands in the decisions ledger
+  ([audit-decisions](../audit-decisions/SKILL.md)), not implementer discretion.
 - What must stay green?
 - What feedback from the human would change this slice?
 - If the slice has a human review checkpoint, the slice file must frame it as
