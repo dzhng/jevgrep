@@ -52,3 +52,31 @@ testInDocker("files counts eligible content without credentials or network", asy
     });
   });
 });
+
+testInDocker(
+  "file category preview works without credentials and reports invalid project overrides",
+  async () => {
+    await withCli(async ({ home, run }) => {
+      await mkdir(join(home, "project"));
+      await writeFile(join(home, "project/index.py"), "print('ready')\n");
+      await writeFile(join(home, "project/records.jsonl"), "{}\n");
+      const result = await run(["files", "project", "--only", "code", "--list"]);
+      expect(result).toMatchObject({ code: 0, stderr: "" });
+      expect(result.stdout).toContain("1 file eligible");
+      expect(result.stdout).toContain("No provider requests were made.");
+      expect(result.stdout).toContain('"file_type:data" 1');
+      expect(result.stdout).toContain('- "index.py"');
+      expect(result.stdout).not.toContain('"records.jsonl"');
+      await writeFile(join(home, "project/.jevgrep-types.json"), '{"*.jsonl":"code"}');
+      const overridden = await run(["files", "project", "--only", "code", "--list"]);
+      expect(overridden).toMatchObject({ code: 0, stderr: "" });
+      expect(overridden.stdout).toContain('- "records.jsonl"');
+      await writeFile(join(home, "project/.jevgrep-types.json"), '{"*.jsonl":"coed"}');
+      const invalid = await run(["files", "project", "--only", "code"]);
+      expect(invalid.code).toBe(1);
+      expect(invalid.stdout).toContain(
+        ".jevgrep-types.json contains an invalid pattern or file category.",
+      );
+    });
+  },
+);

@@ -74,6 +74,12 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
   let validationQueue: Promise<void> = Promise.resolve();
   async function freshEvaluation(request: EvaluationRequest, sources: Donor[], navigation = false) {
     const validate = async () => {
+      const policyIssue = await reader.checkPolicy();
+      if (policyIssue) {
+        issue(policyIssue.issue.kind);
+        stop = true;
+        throw new EvaluationFailure("source-invalid");
+      }
       for (const source of new Map(sources.map((source) => [source.path, source])).values()) {
         if (!(await unchanged(source))) throw new EvaluationFailure("source-invalid");
       }

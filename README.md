@@ -138,7 +138,10 @@ Use `--include-sensitive` when a search must include sensitive names, private-ke
 markers, and content-level matches.
 `jg files [root]` counts the files a search under that root may read, grouped by
 top-level directory, with no provider key or network request. It takes the same
-filtering flags as search.
+filtering flags as search. Use `--only code,config,docs` or
+`--exclude-types data,logs,temp` to narrow the scope by filename category before
+paid evaluation. See [choosing a search scope](docs/file-types.md) for previews,
+repository overrides, and the limits of cost savings.
 To skip paths inside that root for one search, pass `--exclude` with a gitignore pattern
 relative to the root, for example `--exclude '**/*.test.ts' --exclude 'src/generated/'`.
 

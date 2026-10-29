@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./file-types": "./src/file-types.ts",
     "./providers": "./src/providers.ts",
     "./source": "./src/source.ts",
     "./storage": "./src/storage.ts"
@@ -23,8 +24,8 @@
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
     "@types/node": "22",
-    "tree-sitter-python": "0.25.0",
     "tree-sitter-go": "0.25.0",
+    "tree-sitter-python": "0.25.0",
     "tree-sitter-rust": "0.24.0"
   }
 }

@@ -202,3 +202,25 @@ test("exclude rejects odd trailing backslash runs but preserves escaped backslas
     }
   }
 });
+
+test("file categories compose across search and preview and reject unknown selections", () => {
+  for (const command of ["question", "files"]) {
+    expect(
+      parseCommand([
+        command,
+        "--only",
+        "code,config",
+        "--only",
+        "code",
+        "--exclude-types",
+        "logs,temp",
+      ]),
+    ).toMatchObject({
+      policy: { only: ["code", "config"], excludeTypes: ["logs", "temp"] },
+    });
+    for (const value of ["", "code,", "coed", "all", "CODE"])
+      expect(() => parseCommand([command, "--only", value])).toThrow("file categor");
+  }
+  for (const command of ["auth", "doctor", "skill"])
+    expect(() => parseCommand([command, "--only", "code"])).toThrow();
+});
