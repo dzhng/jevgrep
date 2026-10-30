@@ -29,7 +29,7 @@
     "verify": "bun run check-types && bun run lint && bun run test && bun run test:installed",
     "eval:swebench": "python3 evals/implementation/swebench/installed.py",
     "test:native": "node scripts/test-native.mjs",
-    "prepare": "husky"
+    "prepare": "node scripts/install-git-hooks.mjs"
   },
   "devDependencies": {
     "oxfmt": "0.57.0",
@@ -37,7 +37,6 @@
     "turbo": "2.10.3",
     "typescript": "catalog:",
     "linguist-languages": "9.5.0",
-    "husky": "9.1.7",
     "lint-staged": "17.6.0"
   },
   "engines": {
