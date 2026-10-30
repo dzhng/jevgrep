@@ -29,6 +29,13 @@ For unattended setup, pipe the key from your secret manager to:
 jg auth --provider opencode --stdin
 ```
 
+OpenCode Zen free-tier keys use a different model ID, so choose `opencode-free`
+(model `jev-1.13-free`) instead:
+
+```sh
+jg auth --provider opencode-free --stdin
+```
+
 Both options are required for piped setup. To send traffic through your own
 TypeSafe-compatible gateway, choose “Custom endpoint” in `auth` and enter its base
 URL and model ID, or pass both explicitly:
