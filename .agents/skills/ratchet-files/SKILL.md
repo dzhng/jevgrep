@@ -95,39 +95,38 @@ Once they agree, set up everything the check needs:
   | husky or a plain hook | the `pre-commit` script | `git diff --cached --name-only -z \| xargs -0 node scripts/check-file-size.mjs` |
 
   Inspect `git config --show-origin --get core.hooksPath` and the existing
-  hooks before changing installation. A relative hooks path is resolved in
-  each checkout, but the config is normally shared: setting `.husky/_` in
-  one checkout does not generate that directory in a new worktree. Reuse an
-  existing runner only with a working installation path for linked worktrees.
+  hooks first. The config is normally shared while a relative path resolves
+  per checkout, so Husky's `.husky/_` exists only where the package install
+  ran and every other worktree commits unchecked. Keep an existing runner
+  only if it installs into linked worktrees too.
 
-  With no runner, add lint-staged as an exact dev dependency and copy
-  [`scripts/install-git-hooks.mjs`](scripts/install-git-hooks.mjs) into the
-  repository's tool scripts. If this skill is committed in the repository,
-  use its bundled installer directly. Adapt the hook's check-script path and
-  package-install instruction to the repository, and invoke the installer
-  from the root package's `prepare` lifecycle, preserving existing prepare
-  work. Commit the installer; hooks must never depend on a global skill path.
+  Otherwise add lint-staged as an exact dev dependency and call
+  [`scripts/install-git-hooks.mjs`](scripts/install-git-hooks.mjs) from the
+  root package's `prepare` script, after any existing prepare work. Use this
+  skill's copy if the skill is committed in the repository, else commit an
+  unchanged copy beside the repository's tool scripts; never point at a
+  global skill path. It installs one hook in the shared hooks directory that
+  runs the committing checkout's own lint-staged, refuses a checkout without
+  dependencies with its lockfile's install command, and leaves custom hooks
+  alone. Each committing worktree needs its own install; never share another
+  checkout's dependencies or build output to provide them. If its logic must
+  change, extend `node --test scripts/install-git-hooks.test.mjs` from this
+  skill to cover it.
 
-  The bundled installer owns shared-hook installation, repeat installs from
-  either checkout type, missing-dependency guidance, and preservation of
-  custom hooks. Reuse it rather than authoring another installer. Its hook
-  runs each committing checkout's installed lint-staged and config; each
-  worktree still needs dependencies. Never share build output to provide them.
-
-  Inspect any reported hook conflict before proceeding. When replacing a
-  repository-owned hook runner, preserve its other checks while migrating
-  its hooks-path setting and removing obsolete setup and dependencies. Do
-  not unset a user's custom setting or leave competing installers. Extend
-  the bundled installer's behavior checks when adapting its installation
-  logic: `node --test scripts/install-git-hooks.test.mjs` from this skill.
+  When replacing a repository-owned runner such as Husky, move its other
+  checks into lint-staged and remove its setup and dependency so no
+  installer competes; never unset a user's own hooks path. Installing an
+  older branch can still re-enable the old runner until a current branch
+  installs again. Inspect any conflict the installer reports before going on.
 - **Exclusions.** Mark generated and vendored code `linguist-generated` or
   `linguist-vendored` in `.gitattributes` instead of adding skip lists. The
   script reads the staged `.gitattributes`, so stage it before rerunning
   `--all`.
 - **Docs.** Document the budget, the opt-out pragma, how package installation
-  enables hooks across worktrees, and that each committing checkout needs
-  dependencies, where the repository documents its other hooks; failing
-  that, in a section of its README, creating one if needed.
+  enables hooks across worktrees, that each committing checkout needs
+  dependencies, and any replaced runner an older branch can re-enable,
+  where the repository documents its other hooks; failing that, in a
+  section of its README, creating one if needed.
 
 Commit the setup through the new hook, without `--no-verify`.
 

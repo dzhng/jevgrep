@@ -67,6 +67,10 @@ if (values.help) {
   process.exit(0);
 }
 const maxTokens = Number(values["max-tokens"]);
+if (!Number.isInteger(maxTokens) || maxTokens <= 0) {
+  console.error(`check-file-size: --max-tokens must be a positive whole number.\n\n${usage}`);
+  process.exit(2);
+}
 const maxBytes = maxTokens * 4;
 
 const git = (args, input) =>
@@ -140,8 +144,19 @@ const sources = (paths) => {
 };
 
 if (values.all) {
-  const over = sources(git(["ls-files", "-z"]).split("\0").filter(Boolean))
-    .map((path) => ({ path, bytes: blobBytes(`:${path}`) }))
+  // One batched size lookup, not a git process per file.
+  const blobs = new Map();
+  for (const entry of git(["ls-files", "--stage", "-z"]).split("\0").filter(Boolean)) {
+    const tab = entry.indexOf("\t"); // A path may itself contain tabs.
+    blobs.set(entry.slice(tab + 1), entry.slice(0, tab).split(" ")[1]);
+  }
+  const paths = sources([...blobs.keys()]);
+  const sizes = git(
+    ["cat-file", "--batch-check=%(objectsize)"],
+    paths.map((path) => `${blobs.get(path)}\n`).join(""),
+  ).split("\n");
+  const over = paths
+    .map((path, i) => ({ path, bytes: Number(sizes[i]) }))
     .filter(({ bytes }) => bytes > maxBytes)
     .sort((a, b) => b.bytes - a.bytes);
   const opted = over.filter(({ path }) => ignored(`:${path}`));
