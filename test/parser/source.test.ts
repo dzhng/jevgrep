@@ -14,6 +14,8 @@ test("extensionless Python shebangs preserve declarations, comments and neighbor
     "#!/usr/bin/env -S PYTHONUNBUFFERED=1 python3",
     "#!/usr/bin/env -S -u PYTHONPATH python3",
     "#! /usr/bin/python3.12\r",
+    "#!/usr/bin/env pypy3",
+    "#!/usr/bin/pypy3.11",
   ]) {
     const source =
       shebang +
@@ -39,6 +41,24 @@ test("extensionless Node shebangs preserve JavaScript declarations and selected 
     const source = shebang + '\n// module\nfunction target() {\n  return "🙂";\n}\n';
     const snapshot = { path: "bin/tool", contentHash: "fixture", source };
     const expected = await inspect({ ...snapshot, path: "bin/tool.js" });
+    assert.equal(expected.mode, "typescript");
+    assert.deepEqual(await inspect(snapshot), expected, shebang);
+    assert.equal(expected.units[0]!.name, "target");
+  }
+});
+
+test("extensionless Bun, tsx and Deno shebangs keep TypeScript declarations", async () => {
+  for (const shebang of [
+    "#!/usr/bin/env bun",
+    "#!/usr/bin/bun",
+    "#!/usr/bin/env -S bun --hot",
+    "#!/usr/bin/env tsx",
+    "#!/usr/bin/env -S tsx --watch",
+    "#!/usr/bin/deno",
+  ]) {
+    const source = shebang + '\n// module\nexport function target() {\n  return "🙂";\n}\n';
+    const snapshot = { path: "bin/tool", contentHash: "fixture", source };
+    const expected = await inspect({ ...snapshot, path: "bin/tool.ts" });
     assert.equal(expected.mode, "typescript");
     assert.deepEqual(await inspect(snapshot), expected, shebang);
     assert.equal(expected.units[0]!.name, "target");
