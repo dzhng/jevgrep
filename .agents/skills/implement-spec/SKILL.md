@@ -59,9 +59,9 @@ depends on prior work.
 
    Sizing the pass — measuring what it cost and reworking it when the line count
    is out of proportion to the behaviour it delivers — belongs to the shape pass
-   in step 6, under [refactor-clean](../refactor-clean/SKILL.md).
+   in step 6, under [refactor-change](../refactor-change/SKILL.md).
 6. Run [review](../review/SKILL.md) at the end of every pass, before committing.
-   It sequences the three closeout lenses — refactor-clean on the shape,
+   It sequences the three closeout lenses — refactor-change on the shape,
    code-review on the settled diff, write-docs on what the change touched — and
    you apply the fixes from all three. Long specs are where sediment compounds,
    so hold the shape pass to this pass's own output: dev-only shims, duplicated

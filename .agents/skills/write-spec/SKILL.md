@@ -1,6 +1,6 @@
 ---
 name: write-spec
-description: Break large features into independently verifiable, human-reviewable slices under a feature directory in specs/. Use for risky or multi-step feature work that needs upfront questioning, API seams, browser-playable checkpoints, HTML visualizations, screenshot gates, staged implementation plans, recursive fog-of-war reslicing, or proactive research into reference implementations/best practices before slicing. Pairs with your project's verification harness and screenshot gates (the browser checkpoints), [refactor-clean](../refactor-clean/SKILL.md) (review the materialized spec so the plan describes one-owner architecture, not the feature bolted on), [screenshot-critique](../screenshot-critique/SKILL.md) and [compare-screenshots](../compare-screenshots/SKILL.md) (the visual gates), and a code-review pass (audit each slice before it lands).
+description: Break large features into independently verifiable, human-reviewable slices under a feature directory in specs/. Use for risky or multi-step feature work that needs upfront questioning, API seams, browser-playable checkpoints, HTML visualizations, screenshot gates, staged implementation plans, recursive fog-of-war reslicing, or proactive research into reference implementations/best practices before slicing. Pairs with your project's verification harness and screenshot gates (the browser checkpoints), [refactor-change](../refactor-change/SKILL.md) (review the materialized spec so the plan describes one-owner architecture, not the feature bolted on), [screenshot-critique](../screenshot-critique/SKILL.md) and [compare-screenshots](../compare-screenshots/SKILL.md) (the visual gates), and a code-review pass (audit each slice before it lands).
 ---
 
 # Write Spec
@@ -147,7 +147,7 @@ whole feature is done.
    slice file or the slice needs another pass.
 6. **Materialize:** create `specs/<feature>/` when the feature has more than
    one slice or needs assets/visualizations.
-7. **Refactor-clean the plan:** run [refactor-clean](../refactor-clean/SKILL.md)
+7. **Refactor the plan:** run [refactor-change](../refactor-change/SKILL.md)
    over the materialized spec — the plan is architecture too, and it must describe
    the shape the codebase would want if designed today, not the old shape with the
    feature bolted on. Name each concept that should have one owner (projection,
