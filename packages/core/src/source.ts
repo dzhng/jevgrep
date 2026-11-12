@@ -42,8 +42,10 @@ export function resolveLanguage(
       !arg.startsWith("-") && !arg.includes("=") && !/^-[uCPa]$/.test(args[index - 1] ?? ""),
   );
   const interpreter = basename(basename(program) === "env" ? (command ?? "") : program);
-  if (/^python(\d+(\.\d+)?)?$/.test(interpreter)) return "python";
+  if (/^(?:python|pypy)(?:\d+(?:\.\d+)?)?$/.test(interpreter)) return "python";
   if (interpreter === "node" || interpreter === "nodejs") return "JS";
+  // Bun, tsx and Deno run TypeScript by default; the TS parser also accepts plain JavaScript.
+  if (interpreter === "bun" || interpreter === "tsx" || interpreter === "deno") return "TS";
 }
 
 type SourceText = { bytes: Buffer; offsets: number[]; lineCount: number };
