@@ -1,5 +1,5 @@
 ---
-name: refactor-clean
+name: refactor-change
 description: Refactor cleanly instead of layering sediment. Use for rename requests, stale or misleading names, legacy leftovers, changed scope, or when a change reveals duplicated concepts, local adapters, obsolete owners, redundant inputs or guards, compatibility wrappers, parallel abstractions, an over-large module that has accreted many responsibilities, or "just tack this on" pressure in any code area.
 ---
 
@@ -22,7 +22,8 @@ module into the several owners it was hiding.
    or several concepts fused into one over-loaded module. Identify the thing(s)
    that should each have one owner: environment, pricing rule, geometry source,
    state machine, data contract, renderer phase, API shape, UI state, or test
-   oracle.
+   oracle. When a lifecycle is spread across flags, effects, and callbacks, use
+   [find-state-machines](../find-state-machines/SKILL.md).
 3. Find every current owner and consumer. Treat wrappers, aliases, pass-local
    constants, copied structs, migration comments and "temporary" branches as
    sediment until proven otherwise.
@@ -67,7 +68,9 @@ module into the several owners it was hiding.
      "the consumer would then do the wrong thing" is.
   The bar is not "is this correct?" — defensive code is usually correct.
   The bar is "what breaks, for whom, if this line doesn't exist?" No
-  concrete answer → no line.
+  concrete answer → no line. To roll back protective code and migrations
+  that cost more than they protect, use
+  [find-overengineering](../find-overengineering/SKILL.md).
 - **Measure the change, and treat a bad size-to-behaviour ratio as a shape
   defect.** Before accepting a change, count what it actually cost — production
   code apart from tests and docs, and comments apart from logic, because a

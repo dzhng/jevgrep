@@ -10,6 +10,8 @@ refactor or config change that preserves it. Most bad tests fail the opposite
 way: red on harmless changes, green while the real path is broken. Every rule
 below serves that one goal.
 
+Default to end-to-end or system-level tests for regression coverage; use a unit test only for specific, complex business logic when fast feedback will materially speed development.
+
 For deciding whether coverage adds independent proof, where it belongs, or
 which existing tests can go, use [audit-tests](../audit-tests/SKILL.md).
 
@@ -35,18 +37,23 @@ which existing tests can go, use [audit-tests](../audit-tests/SKILL.md).
   which internal functions ran or how a value is computed. A test on the public
   surface survives a rewrite of everything underneath; a test that reaches into
   internals breaks on every refactor and pins implementation, not behavior.
-  Reserve isolated unit tests for genuinely tricky pure logic (parsers,
-  schedulers, state machines).
+  Use an isolated unit test only when the logic is specific and complex enough
+  that its faster feedback will materially speed development.
 - **Nothing the compiler already guarantees.** A test that re-asserts a type
   signature — field shapes, rejected argument types — can only fail if the
   compiler failed first. Spend the budget on business rules, arithmetic,
   branching, ordering, edge cases, side effects.
+- **Not presentation.** Class names, styles and copy are content, not logic.
+  Checking them as strings only repeats the source: the test breaks on every
+  design or wording edit and passes when the page looks wrong. Check
+  appearance by looking at it: extend the visual test that already covers that
+  part of the UI, or add one. Add a behavioural test only if the change also
+  alters behaviour or accessibility.
 - **Actual values, not collection sizes.** For dedup/normalize/idempotency
   paths, `length == 1` passes even when normalization is broken; also assert
   the stored value equals the expected canonical form.
-- **The smallest scale that can show the behavior.** Two entities and one
-  mechanism before crowds and integration; small tests fail fast with readable
-  state and don't entangle five behaviors in one assert.
+- **Keep system scenarios small.** Use the minimum data and mechanisms needed
+  to prove the end-to-end behavior without entangling unrelated claims.
 - **The design contract, not current behavior.** When a test goes red, the
   reflex is to re-measure and pin the new number — resist it: a bar calibrated
   to whatever the code currently does silently encodes bugs as baseline. Write
@@ -135,6 +142,10 @@ confirm green. Verify the revert actually took: a stash or checkout with a
 wrong pathspec reverts nothing, silently, and the "red" run quietly tests the
 fixed code. The tell: the "red" numbers equal the green numbers.
 
+For a screenshot test, confirm the capture differs before and after at the
+state you changed. A screenshot taken in a different state than the one you
+changed proves nothing.
+
 ## When a test goes red after a change
 
 Triage in order of likelihood before editing anything:
@@ -169,3 +180,5 @@ Walk this on any test diff, apply fixes in the same pass, re-run the suite:
 8. Does it take focus, move the pointer, play sound, or write the person's real
    config, library or applications? → drive the model and a scratch location
    instead, and capture windows offscreen.
+9. Does it check a class name, style or line of copy as a string? → delete
+   it; check appearance with a screenshot.

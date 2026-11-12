@@ -1,2 +1,7 @@
 # Verbatim packet evidence keeps spaces after numbered blank source lines.
 specs/done/provider-support/assets/provider-stdout.txt whitespace=-blank-at-eol
+
+# Ratchet exclusions: generated and vendored source is maintained by its producer.
+**/generated/** linguist-generated
+**/*.generated.* linguist-generated
+**/vendor/** linguist-vendored

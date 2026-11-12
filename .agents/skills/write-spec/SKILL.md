@@ -1,6 +1,6 @@
 ---
 name: write-spec
-description: Break large features into independently verifiable, human-reviewable slices under a feature directory in specs/. Use for risky or multi-step feature work that needs upfront questioning, API seams, browser-playable checkpoints, HTML visualizations, screenshot gates, staged implementation plans, recursive fog-of-war reslicing, or proactive research into reference implementations/best practices before slicing. Pairs with your project's verification harness and screenshot gates (the browser checkpoints), [refactor-clean](../refactor-clean/SKILL.md) (review the materialized spec so the plan describes one-owner architecture, not the feature bolted on), [screenshot-critique](../screenshot-critique/SKILL.md) and [compare-screenshots](../compare-screenshots/SKILL.md) (the visual gates), and a code-review pass (audit each slice before it lands).
+description: Break large features into independently verifiable, human-reviewable slices under a feature directory in specs/. Use for risky or multi-step feature work that needs upfront questioning, API seams, browser-playable checkpoints, HTML visualizations, screenshot gates, staged implementation plans, recursive fog-of-war reslicing, or proactive research into reference implementations/best practices before slicing. Pairs with your project's verification harness and screenshot gates (the browser checkpoints), [refactor-change](../refactor-change/SKILL.md) (review the materialized spec so the plan describes one-owner architecture, not the feature bolted on), [screenshot-critique](../screenshot-critique/SKILL.md) and [compare-screenshots](../compare-screenshots/SKILL.md) (the visual gates), and a code-review pass (audit each slice before it lands).
 ---
 
 # Write Spec
@@ -147,7 +147,7 @@ whole feature is done.
    slice file or the slice needs another pass.
 6. **Materialize:** create `specs/<feature>/` when the feature has more than
    one slice or needs assets/visualizations.
-7. **Refactor-clean the plan:** run [refactor-clean](../refactor-clean/SKILL.md)
+7. **Refactor the plan:** run [refactor-change](../refactor-change/SKILL.md)
    over the materialized spec — the plan is architecture too, and it must describe
    the shape the codebase would want if designed today, not the old shape with the
    feature bolted on. Name each concept that should have one owner (projection,
@@ -177,7 +177,7 @@ whole feature is done.
    iterate on quickly. Keep the README's "Next Agent Prompt" written as the
    handoff text a future agent should read and follow.
 10. **Reslice when the work says so:** if implementation hits a snag and the slice
-   starts changing unrelated variables — or the choices ledger keeps filling
+   starts changing unrelated variables — or the decisions ledger keeps filling
    from one slice — stop broadening the patch. Update the spec
    first: split the slice into smaller contracts, name the frozen inputs, move the
    extra visual variables to later slices, and rewrite the Next Agent Prompt to
@@ -256,8 +256,8 @@ Each slice file answers:
 - What decisions are delegated to the implementer? Name the freedoms
   deliberately left open (internal structure, naming, reversible cosmetic
   calls). Everything else must be resolved by the slice: an unlisted decision
-  the implementer has to invent is a spec gap that lands in the choices ledger
-  ([audit-choices](../audit-choices/SKILL.md)), not implementer discretion.
+  the implementer has to invent is a spec gap that lands in the decisions ledger
+  ([audit-decisions](../audit-decisions/SKILL.md)), not implementer discretion.
 - What must stay green?
 - What feedback from the human would change this slice?
 - If the slice has a human review checkpoint, the slice file must frame it as

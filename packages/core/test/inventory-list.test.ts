@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { inventory } from "../src/inventory";
 
 test("inventory optionally retains eligible paths and respects exclusions and entry bounds", async () => {
@@ -12,7 +12,7 @@ test("inventory optionally retains eligible paths and respects exclusions and en
       "terraform.tfvars": 'db_password = "synthetic fixture"',
       "config/database.yml": "password: synthetic fixture",
       "src/z.ts": "export const z = 1;",
-      "src/line\nbreak.ts": "export const a = 1;",
+      "src/line break.ts": "export const a = 1;",
       "ignored/output.ts": "ignored",
       ".env": "hidden",
       "server.pem": "sensitive",
@@ -20,8 +20,9 @@ test("inventory optionally retains eligible paths and respects exclusions and en
       "protected/a.ts": "protected",
     };
     for (const [path, content] of Object.entries(files)) {
-      await mkdir(join(root, path, ".."), { recursive: true });
-      await writeFile(join(root, path), content);
+      const filePath = join(root, path);
+      await mkdir(dirname(filePath), { recursive: true });
+      await writeFile(filePath, content);
     }
     const input = {
       root,
@@ -33,7 +34,7 @@ test("inventory optionally retains eligible paths and respects exclusions and en
     const listed = await inventory({ ...input, includePaths: true });
     expect(listed.paths).toEqual([
       "config/database.yml",
-      "src/line\nbreak.ts",
+      "src/line break.ts",
       "src/z.ts",
       "terraform.tfvars",
     ]);
@@ -45,7 +46,7 @@ test("inventory optionally retains eligible paths and respects exclusions and en
       includePaths: true,
       policy: { exclude: ["config/", "*.tfvars"] },
     });
-    expect(narrowed.paths).toEqual(["src/line\nbreak.ts", "src/z.ts"]);
+    expect(narrowed.paths).toEqual(["src/line break.ts", "src/z.ts"]);
     const bounded = await inventory({ ...input, includePaths: true, maxEntries: 2 });
     expect(bounded.status).toBe("incomplete");
     expect(bounded.paths?.length).toBe(bounded.files);

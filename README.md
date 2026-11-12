@@ -84,7 +84,7 @@ list.
 
 The summary and compact file list come first, followed by selected source with
 line references, then detailed declaration and call locations. Python, TypeScript/JavaScript, Go and Rust support declaration
-parsing, with extensionless Python and Node scripts recognised by their shebang;
+parsing, with extensionless Python, Node, Bun and Deno scripts recognised by their shebang;
 other text uses a fallback. The output is evidence for the agent to use,
 not a generated answer or a guarantee that every relevant file was found.
 [See a recorded output example](specs/done/jevgrep/assets/stdout-example.txt).
@@ -174,3 +174,7 @@ See [Contributing](CONTRIBUTING.md) for the pull-request review and maintenance
 policy.
 
 [MIT](LICENSE). [Artwork and generation prompts](assets/README.md).
+
+## Ratchet Files
+
+Source files are limited to 8,000 estimated tokens (bytes divided by four). The pre-commit hook runs `scripts/check-file-size.mjs` through lint-staged. `bun install` runs `scripts/install-git-hooks.mjs`, which installs the hook once in the repository's shared hooks directory, so every linked worktree runs it; each checkout that commits needs its own `bun install`, and commits from one without dependencies are refused. Installing a branch from before this change re-enables Husky for every checkout until a current branch runs `bun install` again. Existing oversized authored files are frozen at their current size; generated and vendored paths are excluded through `.gitattributes`. A file may use `@ratchet-files-ignore` in its first 10 lines only when splitting it would cost more than it saves, with the reason beside the pragma.

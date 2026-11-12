@@ -28,16 +28,22 @@
     "test:e2e": "bun run test:installed",
     "verify": "bun run check-types && bun run lint && bun run test && bun run test:installed",
     "eval:swebench": "python3 evals/implementation/swebench/installed.py",
-    "test:native": "node scripts/test-native.mjs"
+    "test:native": "node scripts/test-native.mjs",
+    "prepare": "node scripts/install-git-hooks.mjs"
   },
   "devDependencies": {
     "oxfmt": "0.57.0",
     "oxlint": "1.72.0",
     "turbo": "2.10.3",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "linguist-languages": "9.5.0",
+    "lint-staged": "17.6.0"
   },
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "bun@1.3.14"
+  "packageManager": "bun@1.3.14",
+  "lint-staged": {
+    "*": "node scripts/check-file-size.mjs"
+  }
 }

@@ -32,7 +32,7 @@ raising `--effort`.
 - **One task per run.** Split unrelated asks (review, then fix, then docs) into
   separate runs; a mixed prompt gets a mixed result.
 - **Name skills instead of restating them.** Codex reads the same skills your
-  repo carries — say "follow write-docs for the doc", "obey refactor-clean: no
+  repo carries — say "follow write-docs for the doc", "obey refactor-change: no
   compatibility wrappers." Don't re-explain what a skill already carries.
 - **Blocks, added only where the task needs them:**
   - `<task>` — the concrete job, the repo/failure context, the expected end
@@ -77,7 +77,7 @@ change — before declaring it done or committing. Skip it for trivial edits
    prompt. For custom framing, specify the exact diff to inspect in the prompt;
    don't rely on default scope or traverse all refs/checkpoint history. Never
    state the answer you expect (unprimed, same discipline as
-   [screenshot-critique](../../visual/screenshot-critique/SKILL.md)).
+   [screenshot-critique](../screenshot-critique/SKILL.md)).
 2. Monitor progress in `events.jsonl` and failures in `stderr.log`. An active
    reviewer reading relevant code is not hung merely because five minutes
    elapsed. If it stalls or drifts outside the diff and its dependencies,

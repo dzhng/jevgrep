@@ -24,7 +24,9 @@ A change that reaches the whole system (the retrieval pipeline, the response a c
 
 Every expensive run must answer a question a cheaper one can't. Benchmark runs, which spend real money, and the container tests of the installed package are the expensive runs here; do only the ones a change can move. Reuse a result that is still valid, and rerun only what a change could have invalidated. Docs and data that no code reads need no run at all.
 
-Write the test first. Before changing behaviour or fixing a bug, invoke [`write-tests`](.agents/skills/write-tests/SKILL.md) and follow its red/green workflow. Test what the product does and how it fails, not how the code is shaped.
+Default to end-to-end or system-level tests for regression coverage; use a unit test only for specific, complex business logic when fast feedback will materially speed development.
+
+Write the test first. Before changing behaviour or fixing a bug, invoke [`write-tests`](.agents/skills/write-tests/SKILL.md) and follow its red/green workflow. Test what the product does and how it fails. Never test presentation as a string: a class name is no more logic than a marketing headline.
 
 A change that shouldn't alter behaviour (a refactor, a performance change) must leave the output unchanged, or be a named decision.
 
@@ -58,7 +60,7 @@ Use what the repo already chose before writing your own. Find the existing owner
 
 Prefer one general rule to a special case, and a simple structure to an abstraction nobody needs yet.
 
-Spend margin on simplicity. When something has room to spare against its budget (response time, startup, memory, bandwidth), use that room to keep the design simple. Don't add machinery to make a thing faster than it needs to be, and take such machinery out when the margin shows it wasn't needed. When something replaces an old mechanism, delete the old one. When a change exposes a duplicate or a stale owner, invoke [`refactor-clean`](.agents/skills/refactor-clean/SKILL.md).
+Spend margin on simplicity. When something has room to spare against its budget (response time, startup, memory, bandwidth), use that room to keep the design simple. Don't add machinery to make a thing faster than it needs to be, and take such machinery out when the margin shows it wasn't needed. When something replaces an old mechanism, delete the old one. When a change exposes a duplicate or a stale owner, invoke [`refactor-change`](.agents/skills/refactor-change/SKILL.md).
 
 ## Parallel work stays cheap
 

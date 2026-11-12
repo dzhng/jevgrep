@@ -73,7 +73,7 @@ Review the diff or specified files against these principles.
 
 - If a module only forwards another package's functions or types, delete it and import the original package directly.
 - Do not preserve local compatibility shims for scaffold code or unshipped branch work. Replace the scaffold outright.
-- Re-export barrels are not useful unless they define a real public boundary with project-specific semantics. Avoid creating files whose only job is `export * from ...`.
+- No barrel files: never write an `index.ts` that only re-exports other modules. Import from the module that defines the name.
 - Prefer using the upstream API name directly over inventing local aliases like `discoverAll()` for `loadSkills()`.
 
 ## 11. Extract only around real ownership boundaries
@@ -93,7 +93,7 @@ The most valuable test suite is the one most decoupled from the implementation i
 - **A passing test should mean a real user gets the right result.** If a test can pass while the production path is broken, the test is wired wrong. Common smells: stubbing the thing under test, bypassing the router/dispatcher/parser, hand-constructing internal events that production would have built from input.
 - **Harnesses must wire the system the way production wires it.** Optional inputs that are always set in practice are part of the contract — pass equivalents in the harness (e.g. a settled status stream, the modal config, the same env vars). If you found a bug only by running against a real environment, the harness skipped something production sets; fix the harness so the next regression in the same shape is caught by the test suite, not by a user.
 - **Coupled tests are a refactor tax.** When renaming an internal function or moving a module breaks dozens of tests without changing any user-visible behavior, the suite is testing the wrong layer. Rewrite those tests against the outer surface and delete the brittle ones.
-- **Reserve unit tests for genuinely tricky pure logic** — parsers, normalizers, schedulers, state machines with subtle invariants. Everything else earns more value as an integration or end-to-end test.
+- **Default to end-to-end or system-level regression tests.** Use a unit test only for specific, complex business logic when fast feedback will materially speed development.
 
 ## 13. A failing check can be a toolchain defect, not a code defect
 
