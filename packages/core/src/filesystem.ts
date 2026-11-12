@@ -3,7 +3,13 @@ import { constants, type BigIntStats, type Dir } from "node:fs";
 import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import ignore, { type Ignore } from "ignore";
-import { typeClassifier, type FileType, FileTypeError, isFileType } from "./file-types";
+import {
+  classifyFile,
+  needsShebangClassification,
+  type FileType,
+  FileTypeError,
+  isFileType,
+} from "./file-types";
 import { storageDirectory } from "./storage";
 import { containsLikelySecret } from "./secrets";
 
@@ -313,8 +319,6 @@ export async function createFilesystem(options: FilesystemOptions) {
         currentRoot.dev !== rootStat.dev
       )
         return issue("changed", named.path);
-      const policyIssue = await checkPolicy();
-      if (policyIssue) return policyIssue;
       if (!components.length) return { status: "eligible", ...named, stat: currentRoot, ancestors };
       ancestors.push({ path: root, stat: currentRoot });
       for (let index = 0; index < components.length; index++) {
@@ -366,7 +370,12 @@ export async function createFilesystem(options: FilesystemOptions) {
           return excluded("exclude_pattern");
         if (index === components.length - 1) {
           if (stat.isFile() && classify) {
-            const type = classify(named.path);
+            let type = classify(named.path);
+            if (needsShebangClassification(named.path)) {
+              const peek = await peekShebang(named.absolute, named.path, stat);
+              if (peek && typeof peek !== "string") return peek;
+              type = classify(named.path, peek);
+            }
             if ((policy.only && !policy.only.includes(type)) || policy.excludeTypes?.includes(type))
               return excluded(`file_type:${type}`);
           }
@@ -577,84 +586,32 @@ export async function createFilesystem(options: FilesystemOptions) {
     reusableBytes = 0;
     await Promise.all([...cursors.keys()].map(discard));
   }
-  // Load only for an explicit category filter, so unfiltered searches keep their existing policy.
-  let classify: ReturnType<typeof typeClassifier> | undefined;
-  let typeConfigStat: BigIntStats | undefined;
-  let typeConfigBytes: Buffer | undefined;
-  let typeConfigReusable = false;
-  async function checkPolicy(): Promise<Issue | undefined> {
-    if (!classify) return;
-    const path = ".jevgrep-types.json";
-    const absolute = join(root, path);
-    const started = BigInt(Math.floor(now())) * 1_000_000n;
+  // Classify only when a category filter is requested, so unfiltered searches stay unchanged.
+  const classify = policy.only || policy.excludeTypes?.length ? classifyFile : undefined;
+  async function peekShebang(
+    absolute: string,
+    path: string,
+    stat: BigIntStats,
+  ): Promise<string | Issue | undefined> {
+    let handle;
     try {
-      const current = await lstat(absolute, { bigint: true }).catch((error) => {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        return undefined;
-      });
-      if (current ? !typeConfigStat || !same(current, typeConfigStat) : typeConfigStat)
-        return issue("changed", path);
-      if (
-        current &&
-        typeConfigReusable &&
-        !(await sameFile(
-          { status: "eligible", path, absolute, stat: current, ancestors: [] },
-          current,
-        ))
-      )
-        return issue("changed", path);
-      if (current && !typeConfigReusable) {
-        const result = await readBytes(
-          {
-            status: "eligible",
-            path,
-            absolute,
-            stat: current,
-            ancestors: [{ path: root, stat: rootStat }],
-          },
-          limits.maxIgnoreBytes,
-        );
-        if (result.status !== "ok") return result;
-        if (!result.bytes.equals(typeConfigBytes!)) return issue("changed", path);
-        typeConfigReusable = canReuseIdentity(current, started);
-      }
+      // NONBLOCK prevents a concurrent replacement with a FIFO from hanging the process.
+      handle = await open(
+        absolute,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+      );
+      const before = await handle.stat({ bigint: true });
+      if (!before.isFile() || !same(stat, before)) return issue("changed", path);
+      const chunk = Buffer.allocUnsafe(1024);
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, 0);
+      if (!bytesRead) return;
+      return chunk.subarray(0, bytesRead).toString("latin1").split(/\r?\n/, 1)[0];
     } catch (error) {
       return issue(errorKind(error), path);
+    } finally {
+      await handle?.close();
     }
   }
-  if (policy.only || policy.excludeTypes?.length) {
-    const name = ".jevgrep-types.json";
-    const absolute = join(root, name);
-    let source: string | undefined;
-    try {
-      const stat = await lstat(absolute, { bigint: true });
-      if (!stat.isFile() || stat.isSymbolicLink())
-        throw new FileTypeError(`${name} must be a regular file.`);
-      const started = BigInt(Math.floor(now())) * 1_000_000n;
-      const result = await readBytes(
-        {
-          status: "eligible",
-          path: name,
-          absolute,
-          stat,
-          ancestors: [{ path: root, stat: rootStat }],
-        },
-        limits.maxIgnoreBytes,
-      );
-      if (result.status !== "ok")
-        throw new FileTypeError(`Could not read ${name}; category filtering was not started.`);
-      source = new TextDecoder("utf-8", { fatal: true }).decode(result.bytes);
-      typeConfigStat = stat;
-      typeConfigBytes = result.bytes;
-      typeConfigReusable = canReuseIdentity(stat, started);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        if (error instanceof FileTypeError) throw error;
-        throw new FileTypeError(`Could not read ${name}; category filtering was not started.`);
-      }
-    }
-    classify = typeClassifier(source);
-  }
-  return { root, readSnapshot, lookupFile, listPage, checkPolicy, closeCursor: discard, close };
+  return { root, readSnapshot, lookupFile, listPage, closeCursor: discard, close };
 }
 export type FilesystemReader = Awaited<ReturnType<typeof createFilesystem>>;

@@ -1,8 +1,8 @@
-import { afterEach, expect, test, spyOn } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile, open, lstat } from "node:fs/promises";
-import * as fs from "node:fs/promises";
+import { afterEach, expect, test } from "bun:test";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { classifyFile } from "../src/file-types";
 import { createFilesystem } from "../src/filesystem";
 import { inventory } from "../src/inventory";
 
@@ -19,6 +19,43 @@ async function fixture(files: Record<string, string>) {
   }
   return root;
 }
+
+test("JSON tool configs are config while generic JSON stays data", () => {
+  for (const path of [
+    "package.json",
+    "tsconfig.json",
+    "tsconfig.build.json",
+    "tsconfig-base.json",
+    "jsconfig.json",
+    "biome.json",
+    "biome.jsonc",
+    "eslint.config.json",
+    "webpack.config.json",
+    ".eslintrc.json",
+    ".prettierrc.json",
+    ".lintstagedrc.json",
+  ])
+    expect(classifyFile(path)).toBe("config");
+  for (const path of ["records.json", "data/events.json", "fixtures/settings.json"])
+    expect(classifyFile(path)).toBe("data");
+});
+
+test("recognised code shebangs classify extensionless files as code", () => {
+  for (const source of [
+    "#!/usr/bin/env python3\nprint('ready')",
+    "#!/usr/bin/env -S python3 -u\nprint('ready')",
+    "#!/usr/bin/pypy3.11\nprint('ready')",
+    "#!/usr/bin/env node\nconsole.log(1)",
+    "#!/usr/bin/env bun\nconsole.log(1)",
+    "#!/usr/bin/env bun --hot\nconsole.log(1)",
+    "#!/usr/bin/env tsx\nconsole.log(1)",
+    "#!/usr/bin/env deno run\nconsole.log(1)",
+  ])
+    expect(classifyFile("bin/tool", source)).toBe("code");
+  expect(classifyFile("bin/tool", "#!/bin/sh\necho ready")).toBe("unknown");
+  expect(classifyFile("bin/tool", "echo no shebang")).toBe("unknown");
+  expect(classifyFile("bin/tool")).toBe("unknown");
+});
 
 test("category selection filters preview, direct reads and lookup before oversized content is opened", async () => {
   const root = await fixture({
@@ -53,17 +90,15 @@ test("category selection filters preview, direct reads and lookup before oversiz
   }
 });
 
-test("categories are a union, exclusions win, and repository overrides disambiguate filenames", async () => {
+test("categories are a union, exclusions win, and JSON configs stay distinct from data", async () => {
   const root = await fixture({
-    ".jevgrep-types.json": JSON.stringify({
-      "*.json": "config",
-      "fixtures/**": "data",
-      "bin/*": "code",
-    }),
     "package.json": "{}",
+    "biome.json": "{}",
+    "tsconfig.build.json": "{}",
+    "eslint.config.json": "{}",
     "records.json": "{}",
-    "fixtures/settings.json": "{}",
-    "bin/worker": "#!/bin/sh\necho ready",
+    "bin/worker": "#!/usr/bin/env bun\nconsole.log('ready')",
+    "bin/shell": "#!/bin/sh\necho ready",
     "unknown.blob": "text",
     "readme.MD": "guide",
     "audio.MP3": "sound",
@@ -76,15 +111,15 @@ test("categories are a union, exclusions win, and repository overrides disambigu
   const signal = new AbortController().signal;
   for (const [type, paths] of [
     ["code", ["actual.py", "bin/worker"]],
-    ["config", ["package.json", "records.json"]],
-    ["data", ["fixtures/settings.json"]],
+    ["config", ["biome.json", "eslint.config.json", "package.json", "tsconfig.build.json"]],
+    ["data", ["records.json"]],
     ["docs", ["readme.MD"]],
     ["audio", ["audio.MP3"]],
     ["video", ["video.mp4"]],
     ["archives", ["bundle.tar.gz"]],
     ["logs", ["server.log.2.gz"]],
     ["temp", ["scratch.py~"]],
-    ["unknown", ["unknown.blob"]],
+    ["unknown", ["bin/shell", "unknown.blob"]],
   ] as const) {
     const result = await inventory({ root, signal, includePaths: true, policy: { only: [type] } });
     expect(result.paths).toEqual([...paths]);
@@ -120,7 +155,7 @@ test("categories are a union, exclusions win, and repository overrides disambigu
         },
       })
     ).paths,
-  ).toEqual(["unknown.blob"]);
+  ).toEqual(["bin/shell", "unknown.blob"]);
 });
 
 test("type selection never overrides explicit exclusions, ignore rules, or sensitive and binary checks", async () => {
@@ -164,31 +199,13 @@ test("type selection never overrides explicit exclusions, ignore rules, or sensi
   }
 });
 
-test("invalid repository mappings fail closed only when category filtering is requested", async () => {
-  const root = await fixture({ ".jevgrep-types.json": "{bad json", "a.py": "pass" });
-  const signal = new AbortController().signal;
-  expect((await inventory({ root, signal, includePaths: true })).paths).toEqual(["a.py"]);
-  for (const contents of [
-    "{bad json",
-    "[]",
-    "null",
-    '{"*.py":"coed"}',
-    '{"!*.py":"code"}',
-    '{"*.py":null}',
-  ]) {
-    await writeFile(join(root, ".jevgrep-types.json"), contents);
-    await expect(inventory({ root, signal, policy: { only: ["code"] } })).rejects.toThrow(
-      ".jevgrep-types.json",
-    );
-  }
-});
-
 test("standard configuration dotfiles still require the independent hidden and sensitive flags", async () => {
   const root = await fixture({
     ".editorconfig": "root = true",
     ".env": "MODE=dev",
     ".env.local": "MODE=dev",
     "settings.env": "MODE=dev",
+    ".eslintrc.json": "{}",
   });
   const signal = new AbortController().signal;
   expect(
@@ -200,7 +217,7 @@ test("standard configuration dotfiles still require the independent hidden and s
         policy: { only: ["config"], hidden: true, includeSensitive: true },
       })
     ).paths,
-  ).toEqual([".editorconfig", ".env", ".env.local", "settings.env"]);
+  ).toEqual([".editorconfig", ".env", ".env.local", ".eslintrc.json", "settings.env"]);
   expect(
     (
       await inventory({
@@ -210,70 +227,21 @@ test("standard configuration dotfiles still require the independent hidden and s
         policy: { only: ["config"], hidden: true },
       })
     ).paths,
-  ).toEqual([".editorconfig"]);
+  ).toEqual([".editorconfig", ".eslintrc.json"]);
 });
 
-test("adding, editing or removing a category mapping invalidates the active reader", async () => {
-  const root = await fixture({ "a.ts": "export const ready = true;" });
-  const config = join(root, ".jevgrep-types.json");
-  for (const mode of ["add", "edit", "remove"]) {
-    if (mode !== "add") await writeFile(config, '{"*.ts":"code"}');
-    const reader = await createFilesystem({ root, policy: { only: ["code"] } });
-    try {
-      expect(await reader.readSnapshot("a.ts")).toMatchObject({ status: "ok" });
-      if (mode === "remove") await rm(config);
-      else await writeFile(config, '{"*.ts":"data"}');
-      expect(await reader.readSnapshot("a.ts")).toEqual({
-        status: "issue",
-        issue: { kind: "changed", path: ".jevgrep-types.json" },
-      });
-    } finally {
-      await reader.close();
-    }
-  }
-});
-
-test("same-tick equal-size mapping edits are detected even when metadata is unchanged", async () => {
+test("a .jevgrep-types.json file is not loaded as a classification override", async () => {
   const root = await fixture({
-    ".jevgrep-types.json": '{"*.ts":"code"}',
-    "a.ts": "export const ready = true;",
+    ".jevgrep-types.json": JSON.stringify({ "*.json": "config", "bin/*": "code" }),
+    "records.json": "{}",
+    "bin/worker": "echo ready",
+    "keep.py": "pass",
   });
-  const config = join(root, ".jevgrep-types.json");
-  const initial = await lstat(config, { bigint: true });
-  const probe = await open(config);
-  const prototype = Object.getPrototypeOf(probe);
-  const originalStat = prototype.stat;
-  await probe.close();
-  const originalLstat = fs.lstat;
-  // Model a coarse filesystem clock at the OS boundary, retaining real file bytes and identities.
-  const pin = (stat: typeof initial) => {
-    if (stat.ino === initial.ino && stat.dev === initial.dev) {
-      stat.mtimeNs = initial.mtimeNs;
-      stat.ctimeNs = initial.ctimeNs;
-    }
-    return stat;
-  };
-  const lstatSpy = spyOn(fs, "lstat").mockImplementation(async (...args) =>
-    pin((await originalLstat(...args)) as typeof initial),
-  );
-  const statSpy = spyOn(prototype, "stat").mockImplementation(async function (
-    this: unknown,
-    ...args: unknown[]
-  ) {
-    return pin(await originalStat.apply(this, args));
-  });
-  let reader: Awaited<ReturnType<typeof createFilesystem>> | undefined;
-  try {
-    reader = await createFilesystem({ root, policy: { only: ["code"] } });
-    expect(await reader.readSnapshot("a.ts")).toMatchObject({ status: "ok" });
-    await writeFile(config, '{"*.ts":"data"}');
-    expect(await reader.readSnapshot("a.ts")).toEqual({
-      status: "issue",
-      issue: { kind: "changed", path: ".jevgrep-types.json" },
-    });
-  } finally {
-    lstatSpy.mockRestore();
-    statSpy.mockRestore();
-    await reader?.close();
-  }
+  const signal = new AbortController().signal;
+  expect(
+    (await inventory({ root, signal, includePaths: true, policy: { only: ["code"] } })).paths,
+  ).toEqual(["keep.py"]);
+  expect(
+    (await inventory({ root, signal, includePaths: true, policy: { only: ["data"] } })).paths,
+  ).toEqual(["records.json"]);
 });

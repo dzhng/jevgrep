@@ -269,9 +269,11 @@ Search options:
   --no-cache              Disable cache reads and writes
   --concurrency N         Limit in-flight Jev requests; try 1–4 on slow networks
 
-File categories: ${fileTypes.join(", ")}. Classification uses filenames,
-with overrides from .jevgrep-types.json in the search root. Unknown files need
---only unknown to join a restricted selection. Binary content is still excluded.
+File categories: ${fileTypes.join(", ")}. Classification uses filenames;
+extensionless scripts with a recognised code shebang (Python, Node, Bun, tsx,
+Deno, PyPy) count as code. JSON configs such as package.json, tsconfig*.json,
+*.config.json, biome.json and dotfile JSON are config, not data. Unknown files
+need --only unknown to join a restricted selection. Binary content is still excluded.
 
 Filesystem policy flags also apply to jg files.
 Use jg files [root] --list to show every eligible relative path, quoted and
