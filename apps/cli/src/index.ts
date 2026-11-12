@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { FileTypeError } from "@repo/core/file-types";
 import { authenticate, loadCredentials } from "./auth";
 import { endpointFor } from "@repo/core/providers";
 import type { Inventory, RetrievalResult } from "@repo/core";
@@ -174,7 +175,7 @@ try {
     process.exitCode = aborted ? 130 : 1;
     const message = aborted
       ? "Interrupted."
-      : error instanceof CliError
+      : error instanceof CliError || error instanceof FileTypeError
         ? error.message
         : "Command failed. Check the root, permissions, credentials, and network.";
     await write(`${message}\n`).catch(() => {});

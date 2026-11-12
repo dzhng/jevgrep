@@ -52,3 +52,20 @@ testInDocker("files counts eligible content without credentials or network", asy
     });
   });
 });
+
+testInDocker("file category preview works without credentials", async () => {
+  await withCli(async ({ home, run }) => {
+    await mkdir(join(home, "project"));
+    await writeFile(join(home, "project/index.py"), "print('ready')\n");
+    await writeFile(join(home, "project/records.jsonl"), "{}\n");
+    await writeFile(join(home, "project/tool"), "#!/usr/bin/env bun\nconsole.log(1)\n");
+    const result = await run(["files", "project", "--only", "code", "--list"]);
+    expect(result).toMatchObject({ code: 0, stderr: "" });
+    expect(result.stdout).toContain("2 files eligible");
+    expect(result.stdout).toContain("No provider requests were made.");
+    expect(result.stdout).toContain('"file_type:data" 1');
+    expect(result.stdout).toContain('- "index.py"');
+    expect(result.stdout).toContain('- "tool"');
+    expect(result.stdout).not.toContain('"records.jsonl"');
+  });
+});

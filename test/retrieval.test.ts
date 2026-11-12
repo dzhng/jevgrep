@@ -1,6 +1,6 @@
 import { renderResult } from "../apps/cli/src/render";
 import { routeProviderFetch } from "./fixtures/provider-route.mjs";
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { mkdtemp, mkdir, open, writeFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -802,3 +802,46 @@ testIfDocker(
     }
   },
 );
+
+test("file categories keep excluded names and content out of provider evaluation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jg-type-provider-"));
+  try {
+    await mkdir(join(root, "mixed"));
+    await writeFile(join(root, "mixed/main.ts"), "export const ready = true;\n");
+    await writeFile(join(root, "mixed/private-dataset.jsonl"), "DATA_SENTINEL_DO_NOT_SEND\n");
+    await writeFile(join(root, "mixed/runtime.log"), "LOG_SENTINEL_DO_NOT_SEND\n");
+    const sent: string[] = [];
+    const signal = new AbortController().signal;
+    const result = await retrieve(
+      { root, query: "ready", policy: { only: ["code"] }, signal },
+      createEvaluator({
+        provider: "typesafe",
+        apiKey: "fixture",
+        signal,
+        fetch: async (_input, init) => {
+          const request = String(init?.body);
+          sent.push(request);
+          const body = JSON.parse(request) as { questions: Record<string, unknown> };
+          return Response.json({
+            answers: Object.fromEntries(
+              Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.95 }]),
+            ),
+          });
+        },
+      }),
+    );
+    expect(result.status).toBe("complete");
+    expect(result.files.map((file) => file.path)).toEqual(["mixed/main.ts"]);
+    const payloads = sent.join("\n");
+    expect(payloads).toContain("main.ts");
+    for (const forbidden of [
+      "private-dataset.jsonl",
+      "runtime.log",
+      "DATA_SENTINEL_DO_NOT_SEND",
+      "LOG_SENTINEL_DO_NOT_SEND",
+    ])
+      expect(payloads).not.toContain(forbidden);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

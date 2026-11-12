@@ -3,11 +3,21 @@ import { constants, type BigIntStats, type Dir } from "node:fs";
 import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import ignore, { type Ignore } from "ignore";
+import {
+  classifyFile,
+  needsShebangClassification,
+  type FileType,
+  FileTypeError,
+  isFileType,
+} from "./file-types";
 import { storageDirectory } from "./storage";
 import { containsLikelySecret } from "./secrets";
 
-/** These independent switches broaden only their named exclusion category. */
+/** Shared eligibility controls for search, context donors, and the local file inventory. */
 export type FilesystemPolicy = {
+  /** An opt-in union of filename categories; exclusions always win. */
+  only?: readonly FileType[];
+  excludeTypes?: readonly FileType[];
   hidden?: boolean;
   noIgnore?: boolean;
   includeDependencies?: boolean;
@@ -115,6 +125,10 @@ function same(a: BigIntStats, b: BigIntStats) {
     a.ctimeNs === b.ctimeNs
   );
 }
+function canReuseIdentity(stat: BigIntStats, started: bigint) {
+  const { mtimeNs, ctimeNs } = stat;
+  return (mtimeNs > ctimeNs ? mtimeNs : ctimeNs) + recentChangeNs < started;
+}
 function within(root: string, path: string) {
   const rel = relative(root, path);
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
@@ -151,6 +165,8 @@ export async function createFilesystem(options: FilesystemOptions) {
     if (!Number.isSafeInteger(limits[name]) || limits[name] < 1)
       throw new Error(`Invalid filesystem limit: ${name}`);
   }
+  for (const types of [policy.only, policy.excludeTypes])
+    if (types?.some((type) => !isFileType(type))) throw new FileTypeError("Unknown file category.");
   const now = options.now ?? (() => Date.now());
   const protectedPaths = await Promise.all(
     [storageDirectory("config"), storageDirectory("cache"), ...(options.protectedPaths ?? [])].map(
@@ -352,8 +368,19 @@ export async function createFilesystem(options: FilesystemOptions) {
         const rootRelative = components.slice(0, index + 1).join("/");
         if (excludeRules?.ignores(rootRelative + (stat.isDirectory() ? "/" : "")))
           return excluded("exclude_pattern");
-        if (index === components.length - 1)
+        if (index === components.length - 1) {
+          if (stat.isFile() && classify) {
+            let type = classify(named.path);
+            if (needsShebangClassification(named.path)) {
+              const peek = await peekShebang(named.absolute, named.path, stat);
+              if (peek && typeof peek !== "string") return peek;
+              type = classify(named.path, peek);
+            }
+            if ((policy.only && !policy.only.includes(type)) || policy.excludeTypes?.includes(type))
+              return excluded(`file_type:${type}`);
+          }
           return { status: "eligible", ...named, stat, ancestors };
+        }
         if (!stat.isDirectory()) return excluded("not_directory");
         ancestors.push({ path: absolute, stat });
         directory = absolute;
@@ -456,8 +483,7 @@ export async function createFilesystem(options: FilesystemOptions) {
       source,
       contentHash: createHash("sha256").update(read.bytes).digest("hex"),
     });
-    const { mtimeNs, ctimeNs } = admitted.stat;
-    if ((mtimeNs > ctimeNs ? mtimeNs : ctimeNs) + recentChangeNs < started)
+    if (canReuseIdentity(admitted.stat, started))
       retain(admitted.path, { snapshot, stat: admitted.stat, bytes: read.bytes.length });
     return { status: "ok", snapshot };
   }
@@ -559,6 +585,32 @@ export async function createFilesystem(options: FilesystemOptions) {
     reusable.clear();
     reusableBytes = 0;
     await Promise.all([...cursors.keys()].map(discard));
+  }
+  // Classify only when a category filter is requested, so unfiltered searches stay unchanged.
+  const classify = policy.only || policy.excludeTypes?.length ? classifyFile : undefined;
+  async function peekShebang(
+    absolute: string,
+    path: string,
+    stat: BigIntStats,
+  ): Promise<string | Issue | undefined> {
+    let handle;
+    try {
+      // NONBLOCK prevents a concurrent replacement with a FIFO from hanging the process.
+      handle = await open(
+        absolute,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+      );
+      const before = await handle.stat({ bigint: true });
+      if (!before.isFile() || !same(stat, before)) return issue("changed", path);
+      const chunk = Buffer.allocUnsafe(1024);
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, 0);
+      if (!bytesRead) return;
+      return chunk.subarray(0, bytesRead).toString("latin1").split(/\r?\n/, 1)[0];
+    } catch (error) {
+      return issue(errorKind(error), path);
+    } finally {
+      await handle?.close();
+    }
   }
   return { root, readSnapshot, lookupFile, listPage, closeCursor: discard, close };
 }
