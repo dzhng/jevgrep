@@ -589,7 +589,9 @@ testIfDocker(
   async () => {
     const root = await mkdtemp(join(tmpdir(), "jg-refinement-stop-"));
     try {
-      for (const path of ["a.ts", "b.ts", "c.ts"])
+      // More files than one concurrent wave, so "later files" means files not yet started.
+      const paths = Array.from({ length: 40 }, (_, index) => `f${index}.ts`);
+      for (const path of paths)
         await writeFile(join(root, path), "export function event() { return true; }\n");
       let followups = 0;
       const result = await retrieve(
@@ -605,11 +607,12 @@ testIfDocker(
           },
         },
       );
-      expect(followups).toBe(1);
+      expect(followups).toBeGreaterThan(0);
+      expect(followups).toBeLessThan(paths.length);
       expect(result.status).toBe("incomplete");
-      expect(result.files).toHaveLength(3);
+      expect(result.files).toHaveLength(paths.length);
       expect(result.files.every((file) => file.selected.length > 0)).toBe(true);
-      expect(result.issues).toContainEqual({ kind: "authentication", count: 1 });
+      expect(result.issues.some((entry) => entry.kind === "authentication")).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

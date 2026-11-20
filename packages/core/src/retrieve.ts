@@ -801,7 +801,10 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
         );
       }
       const select = async (evidence?: () => Promise<Evidence[] | undefined>) => {
-        const selectCandidate = async (candidate: (typeof ordered)[number]) => {
+        const selectCandidate = async (
+          candidate: (typeof ordered)[number],
+          invalidated?: Array<(typeof ordered)[number]>,
+        ) => {
           const source = await unchanged(candidate);
           if (!source) return;
           const prior = firstSelections.get(candidate.path);
@@ -810,17 +813,26 @@ export async function retrieve(input: SearchInput, evaluator: Evaluator): Promis
               ? prior.selection
               : await selectSource(candidate, source, files.get(candidate.path), evidence);
           if (!selection) return;
+          if (invalidated && selection.issues.some((entry) => entry.kind === "source-invalid")) {
+            invalidated.push(candidate);
+            return;
+          }
           selection.file.score = candidate.score;
           files.set(candidate.path, selection.file);
           declarations.set(candidate.path, selection.declarations);
           groupCounts.set(candidate.path, selection.groups);
         };
-        if (evidence) {
-          for (const candidate of ordered) {
-            if (stop || input.signal.aborted) break;
-            await selectCandidate(candidate);
-          }
-        } else await parallel(ordered, selectCandidate);
+        if (!evidence) return parallel(ordered, (candidate) => selectCandidate(candidate));
+        // Follow-up requests are independent: donor evidence is fixed before the pass and each
+        // request revalidates its own donors before every attempt, so files need not take turns.
+        // A donor that changes mid-pass invalidates the requests already built on it; those files
+        // are asked again one at a time, with the evidence that is still current.
+        const invalidated: typeof ordered = [];
+        await parallel(ordered, (candidate) => selectCandidate(candidate, invalidated));
+        for (const candidate of invalidated) {
+          if (stop || input.signal.aborted) break;
+          await selectCandidate(candidate);
+        }
       };
       const selectEvidence = async () => {
         await select();
