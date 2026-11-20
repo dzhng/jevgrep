@@ -132,3 +132,16 @@ test("flags GitLab personal access token prefixes", () => {
 test("does not classify UUID-shaped identifiers as secrets", () => {
   expect(containsLikelySecret('api_key: "550e8400-e29b-41d4-a716-446655440000"\n')).toBe(false);
 });
+
+test("scans a large single-line data file in linear time", () => {
+  // Unfixed, each comma rescanned the rest of the line: ~1MB of minified
+  // numbers took minutes, so a search over such a file never returned.
+  const matrix = `{"matrix":[${Array.from({ length: 200_000 }, (_, i) => i % 100).join(",")}]}`;
+  const started = performance.now();
+  expect(containsLikelySecret(matrix)).toBe(false);
+  expect(performance.now() - started).toBeLessThan(2000);
+  // A credential after the long run is still found.
+  expect(containsLikelySecret(`${matrix.slice(0, -1)},"api_key":"xQ9#vL2$mK8@nB4!pT6&wZ3*"}`)).toBe(
+    true,
+  );
+});

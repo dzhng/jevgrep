@@ -74,6 +74,14 @@ const KNOWN_PREFIX_PATTERNS = [...KNOWN_PREFIXES]
   .sort((a, b) => b.length - a.length)
   .map((prefix) => new RegExp(`(?<![A-Za-z0-9_])${escapeRegExp(prefix)}(${TOKEN_TAIL})`, "g"));
 
+/**
+ * One pass that matches wherever any prefix pattern could. Most lines hold no
+ * token at all, so this spares them the per-prefix scans.
+ */
+const ANY_PREFIX_PATTERN = new RegExp(
+  `(?<![A-Za-z0-9_])(?:${KNOWN_PREFIXES.map(escapeRegExp).join("|")})${TOKEN_TAIL}`,
+);
+
 /** Slack webhook URLs carry the secret in the path, not in a token prefix. */
 const SLACK_WEBHOOK_PATTERN = /hooks\.slack\.com\/services\/[A-Za-z0-9_\-/]{24,}/;
 
@@ -85,9 +93,21 @@ const SLACK_WEBHOOK_PATTERN = /hooks\.slack\.com\/services\/[A-Za-z0-9_\-/]{24,}
 const KEY_NAME_PATTERN =
   /(?:^|[^a-z0-9])(?:api[_-]?key|client[_-]?secret|passwd|password|private[_-]?key|secret|auth[_-]?token|access[_-]?token|api[_-]?token|bearer[_-]?token)(?:[^a-z]|$)/i;
 
-/** Assignment shapes across .env / YAML / JSON / TOML / INI and source files, with optional quotes and declaration keywords. */
+/**
+ * The words `KEY_NAME_PATTERN` can match, without its boundaries. A key is a
+ * piece of its line, so text without any of these words has no credential-named
+ * assignment and need not be walked for one.
+ */
+const KEY_WORD_PATTERN =
+  /api[_-]?key|client[_-]?secret|passwd|password|private[_-]?key|secret|auth[_-]?token|access[_-]?token|api[_-]?token|bearer[_-]?token/i;
+
+/**
+ * Assignment shapes across .env / YAML / JSON / TOML / INI and source files, with optional quotes and declaration keywords.
+ * The key length is capped: `assignments` retries this at every separator, so an
+ * unbounded key rescans the rest of a minified data line each time (quadratic).
+ */
 const ASSIGNMENT_PATTERN =
-  /^\s*(?:(?:const|let|var|export|default|public|private|protected|static|readonly|final)\s+)*["']?([^"'=\s:]+)["']?\s*[:=]\s*/;
+  /^\s*(?:(?:const|let|var|export|default|public|private|protected|static|readonly|final)\s+)*["']?([^"'=\s:]{1,256})["']?\s*[:=]\s*/;
 
 const PLACEHOLDER_PATTERN =
   /^(?:your|example|test|fake|dummy|sample|changeme|placeholder|redacted|masked|todo|fixme|none|null|undefined|nil|tbd)[\w-]*$|^x+$|^<.*>$|^\*+$|^\$\{[^}]*\}$|^\{\{[^}]*\}\}$/i;
@@ -264,11 +284,20 @@ function logicalLines(source: string): string[] {
 
 /** True when the source contains at least one line that looks like a stored secret. */
 export function containsLikelySecret(source: string): boolean {
+  // Comment stripping only shortens lines, so a signal absent from the raw text is absent from
+  // every logical line: ordinary source is cleared here without being split or walked.
+  if (
+    !ANY_PREFIX_PATTERN.test(source) &&
+    !SLACK_WEBHOOK_PATTERN.test(source) &&
+    !KEY_WORD_PATTERN.test(source)
+  )
+    return false;
   for (const line of logicalLines(source)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("//")) continue;
-    if (findSecretToken(trimmed) !== undefined) return true;
+    if (ANY_PREFIX_PATTERN.test(trimmed) && findSecretToken(trimmed) !== undefined) return true;
     if (SLACK_WEBHOOK_PATTERN.test(trimmed)) return true;
+    if (!KEY_WORD_PATTERN.test(trimmed)) continue;
     for (const assignment of assignments(trimmed)) {
       if (!KEY_NAME_PATTERN.test(assignment.key)) continue;
       const rawValue = assignment.rawValue;
