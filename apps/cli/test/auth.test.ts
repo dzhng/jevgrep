@@ -161,6 +161,7 @@ testInDocker(
           provider: "custom",
           baseURL,
           model: "gateway/jev-2",
+          protocol: "typesafe",
           apiKey: key,
         });
         if (posix) {

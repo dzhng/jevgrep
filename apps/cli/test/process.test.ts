@@ -75,6 +75,8 @@ try:
     mode = sys.argv[2]
     if mode == "custom-save":
         os.write(master, b"\\x1b[B\\x1b[B\\x1b[B\\x1b[B\\r")
+        wait_for(b"endpoint speak")
+        os.write(master, b"\\r")
         wait_for(b"Base URL")
         os.write(master, b"http://127.0.0.1:8080/v1\\r")
         wait_for(b"Model ID")
@@ -132,6 +134,7 @@ finally:
           provider: "custom",
           baseURL: "http://127.0.0.1:8080/v1",
           model: "gateway/jev-2",
+          protocol: "typesafe",
           apiKey: "pty-fixture-secret",
         });
         expect(result.stdout).toContain("Custom endpoint (127.0.0.1:8080)");

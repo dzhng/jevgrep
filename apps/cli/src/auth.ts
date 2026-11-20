@@ -11,7 +11,9 @@ import {
   providers,
   validateBaseURL,
   validateModel,
+  validateProtocol,
   type CredentialProvider,
+  type Protocol,
   type ProviderId,
 } from "@repo/core/providers";
 import { storageDirectory } from "@repo/core/storage";
@@ -32,15 +34,22 @@ function validateKey(raw: string): string {
 
 export type Credentials =
   | { provider: ProviderId; apiKey: string }
-  | { provider: typeof customProviderId; baseURL: string; model: string; apiKey: string };
+  | {
+      provider: typeof customProviderId;
+      baseURL: string;
+      model: string;
+      protocol: Protocol;
+      apiKey: string;
+    };
 
 export type AuthOptions = {
   provider?: CredentialProvider;
   baseURL?: string;
   model?: string;
+  protocol?: Protocol;
 };
 
-type CustomEndpoint = { baseURL: string; model: string };
+type CustomEndpoint = { baseURL: string; model: string; protocol: Protocol };
 
 function invalid(error: unknown) {
   return error instanceof Error ? error.message : "Invalid value.";
@@ -48,7 +57,11 @@ function invalid(error: unknown) {
 
 function customEndpoint(options: AuthOptions): CustomEndpoint {
   try {
-    return { baseURL: validateBaseURL(options.baseURL), model: validateModel(options.model) };
+    return {
+      baseURL: validateBaseURL(options.baseURL),
+      model: validateModel(options.model),
+      protocol: validateProtocol(options.protocol),
+    };
   } catch (error) {
     throw new CliError(invalid(error));
   }
@@ -73,6 +86,16 @@ async function readKey(signal: AbortSignal): Promise<string> {
 }
 
 async function promptEndpoint(signal: AbortSignal): Promise<CustomEndpoint> {
+  const protocol = await select<Protocol>({
+    message: "What does the endpoint speak?",
+    options: [
+      { value: "typesafe", label: "TypeSafe System One (Jev and compatible gateways)" },
+      { value: "openai", label: "OpenAI-compatible chat completions with token logprobs" },
+    ],
+    output: process.stdout,
+    signal,
+  });
+  if (isCancel(protocol)) throw new DOMException("Interrupted", "AbortError");
   const baseURL = await text({
     message: "Base URL of the custom endpoint",
     placeholder: "https://gateway.example.com/typesafe/v1",
@@ -101,7 +124,7 @@ async function promptEndpoint(signal: AbortSignal): Promise<CustomEndpoint> {
     signal,
   });
   if (isCancel(model)) throw new DOMException("Interrupted", "AbortError");
-  return customEndpoint({ baseURL, model });
+  return customEndpoint({ baseURL, model, protocol });
 }
 
 async function save(credentials: Credentials, signal: AbortSignal) {
@@ -193,6 +216,7 @@ export async function loadCredentials(): Promise<Credentials> {
         provider,
         baseURL: validateBaseURL(credentials.baseURL),
         model: validateModel(credentials.model),
+        protocol: validateProtocol(credentials.protocol),
         apiKey,
       };
     }

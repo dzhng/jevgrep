@@ -427,3 +427,61 @@ testIfDocker("cached navigation revalidates source after cache lookup", async ()
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+testIfDocker(
+  "contextual follow-up asks about independent files concurrently",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "jg-followup-concurrency-"));
+    let inFlight = 0;
+    let peak = 0;
+    const followedUp = new Set<string>();
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as any;
+        if (body.state.selectedEvidence) {
+          followedUp.add(body.state.path);
+          peak = Math.max(peak, ++inFlight);
+          await Bun.sleep(100);
+          inFlight--;
+        }
+        return Response.json({
+          answers: Object.fromEntries(
+            Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.9 }]),
+          ),
+        });
+      },
+    });
+    try {
+      const names = ["a", "b", "c", "d"];
+      for (const name of names)
+        await writeFile(
+          join(root, `${name}.ts`),
+          `export function ${name}Handler() { return "${name}"; }\n`,
+        );
+      const signal = new AbortController().signal;
+      const result = await retrieve(
+        { root, query: "handlers", signal },
+        createEvaluator({
+          apiKey: "fixture",
+          provider: "vercel",
+          fetch: routeProviderFetch(fetch, `http://127.0.0.1:${server.port}`),
+          signal,
+        }),
+      );
+      // Each file's follow-up carries fixed donor evidence and revalidates it itself, so no
+      // file has to wait for another's answer.
+      expect([...followedUp].sort()).toEqual(names.map((name) => `${name}.ts`));
+      expect(peak).toBeGreaterThan(1);
+      expect(result.status).toBe("complete");
+      for (const name of names)
+        expect(
+          result.files.find((file) => file.path === `${name}.ts`)?.excerpts.length,
+        ).toBeGreaterThan(0);
+    } finally {
+      server.stop(true);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);

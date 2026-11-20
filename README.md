@@ -25,7 +25,7 @@ jg skill
 jg "How are telemetry events recorded and sent?" ./my-project
 ```
 
-Requires **Node.js 22+**, **macOS, Linux, or Windows**, and a key for **Vercel AI Gateway, TypeSafe, OpenRouter, OpenCode Zen, or a custom TypeSafe-compatible endpoint**.
+Requires **Node.js 22+**, **macOS, Linux, or Windows**, and a key for **Vercel AI Gateway, TypeSafe, OpenRouter, OpenCode Zen, or a custom endpoint (TypeSafe-compatible, or any OpenAI-compatible chat model that returns token logprobs)**.
 No separate Python, Bun, or ripgrep installation is required to use `jg`.
 
 ## Install the agent skill — required for agent setup

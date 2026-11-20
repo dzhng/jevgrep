@@ -29,13 +29,35 @@ export const customProviderLabel = "Custom endpoint";
 
 export type CredentialProvider = ProviderId | typeof customProviderId;
 
-export type ProviderEndpoint = { label: string; baseURL: string; model: string };
+/**
+ * How questions travel to the endpoint. `typesafe` is the native System One
+ * route every preset uses; `openai` asks any chat-completions model that returns
+ * token log-probabilities.
+ */
+export const protocols = ["typesafe", "openai"] as const;
+export type Protocol = (typeof protocols)[number];
+
+export type ProviderEndpoint = {
+  label: string;
+  baseURL: string;
+  model: string;
+  protocol: Protocol;
+};
 
 export type ProviderSelection = {
   provider: CredentialProvider;
   baseURL?: string;
   model?: string;
+  protocol?: Protocol;
 };
+
+/** Records saved before protocols existed mean `typesafe`. */
+export function validateProtocol(value: unknown): Protocol {
+  if (value === undefined) return "typesafe";
+  if (!protocols.includes(value as Protocol))
+    throw new Error(`Protocol must be one of: ${protocols.join(", ")}.`);
+  return value as Protocol;
+}
 
 export function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && Object.hasOwn(providers, value);
@@ -63,7 +85,7 @@ export function validateBaseURL(value: unknown): string {
     throw new Error(
       "Base URL must use https:// (http:// is allowed only for localhost or 127.0.0.1).",
     );
-  // The SDK appends /systemone directly; URL suffixes would consume that path.
+  // The route path (/systemone or /chat/completions) is appended directly; URL suffixes would consume it.
   if (baseURL.includes("?") || baseURL.includes("#") || url.username || url.password)
     throw new Error("Base URL must not contain credentials, a query string, or a fragment.");
   return baseURL;
@@ -81,6 +103,7 @@ function customEndpoint(selection: ProviderSelection): ProviderEndpoint {
     label: `${customProviderLabel} (${new URL(baseURL).host})`,
     baseURL,
     model: validateModel(selection.model),
+    protocol: validateProtocol(selection.protocol),
   };
 }
 
@@ -88,5 +111,5 @@ function customEndpoint(selection: ProviderSelection): ProviderEndpoint {
 export function endpointFor(selection: ProviderSelection): ProviderEndpoint {
   return selection.provider === customProviderId
     ? customEndpoint(selection)
-    : providers[selection.provider];
+    : { ...providers[selection.provider], protocol: "typesafe" };
 }

@@ -685,3 +685,111 @@ test("token-queued requests revalidate source after waiting", async () => {
   expect(await queued).toMatchObject({ kind: "source-invalid" });
   expect(calls).toBe(3);
 }, 10_000);
+
+/** A chat-completions reply whose first token carries the given yes/no probabilities. */
+function chatReply(yes: number, no: number) {
+  return {
+    choices: [
+      {
+        message: { role: "assistant", content: "Yes" },
+        logprobs: {
+          content: [
+            {
+              token: "Yes",
+              top_logprobs: [
+                { token: "Yes", logprob: Math.log(yes) },
+                { token: " no", logprob: Math.log(no) },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+    usage: { prompt_tokens: 12 },
+  };
+}
+
+test("an OpenAI-compatible endpoint answers each question from yes/no token probabilities", async () => {
+  const observed: Array<{ path: string; authorization: string; model: unknown }> = [];
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const body = (await request.json()) as { model: unknown; messages: unknown };
+      observed.push({
+        path: new URL(request.url).pathname,
+        authorization: request.headers.get("authorization") ?? "",
+        model: body.model,
+      });
+      const prompt = JSON.stringify(body.messages);
+      expect(prompt).toContain("recordEvent()");
+      return Response.json(
+        prompt.includes("Is it a test?") ? chatReply(0.1, 0.4) : chatReply(0.6, 0.2),
+      );
+    },
+  });
+  try {
+    const evaluator = createEvaluator({
+      apiKey: "fixture-key",
+      provider: "custom",
+      protocol: "openai",
+      baseURL: `http://127.0.0.1:${server.port}/v1`,
+      model: "local/any-chat-model",
+      signal: new AbortController().signal,
+    });
+    const scores = await evaluator.evaluate({
+      state: { items: [{ path: "events.ts", source: "recordEvent()" }] },
+      questions: {
+        useful: { type: "boolean", instructions: "Is the source useful?" },
+        test: { type: "boolean", instructions: "Is it a test?" },
+      },
+    });
+    expect(scores.useful).toBeCloseTo(0.75);
+    expect(scores.test).toBeCloseTo(0.2);
+    expect(observed).toHaveLength(2);
+    for (const call of observed)
+      expect(call).toEqual({
+        path: "/v1/chat/completions",
+        authorization: "Bearer fixture-key",
+        model: "local/any-chat-model",
+      });
+    expect(evaluator.requests).toBe(2);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("an OpenAI-compatible reply without a usable yes/no answer is a failure, never a score", async () => {
+  const replies: Array<() => Response> = [
+    // The endpoint ignored the logprobs request.
+    () => Response.json({ choices: [{ message: { role: "assistant", content: "Yes" } }] }),
+    // The model started some other answer: almost no mass on yes or no.
+    () => Response.json(chatReply(0.02, 0.01)),
+    () => Response.json({ error: { message: "bad key" } }, { status: 401 }),
+  ];
+  const server = Bun.serve({ port: 0, fetch: () => replies.shift()!() });
+  try {
+    const evaluator = createEvaluator({
+      apiKey: "fixture-key",
+      provider: "custom",
+      protocol: "openai",
+      baseURL: `http://127.0.0.1:${server.port}/v1`,
+      model: "local/any-chat-model",
+      signal: new AbortController().signal,
+    });
+    const request = {
+      state: "test",
+      questions: { q: { type: "boolean" as const, instructions: "Relevant?" } },
+    };
+    // Navigation requests do not retry a non-transient failure, so each reply is seen once.
+    for (const kind of ["provider", "provider"])
+      await expect(evaluator.evaluate(request, { navigation: true })).rejects.toMatchObject({
+        kind,
+      });
+    await expect(evaluator.evaluate(request)).rejects.toMatchObject({
+      kind: "authentication",
+      diagnostic: { statusCode: 401, message: "bad key" },
+    });
+  } finally {
+    server.stop(true);
+  }
+});

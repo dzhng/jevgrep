@@ -37,9 +37,10 @@ counts even when it contains the bug. Contextual follow-up can recover concretel
 referenced code and retract earlier selections when valid evidence rejects them.
 A failed judgment must not erase previously obtained evidence. Shared criteria and
 local source windows amortize repeated context across declaration judgments.
-Contextual follow-up checks files in sequence so changing donor evidence can be
-revalidated between files; initial selection and provider requests retain their
-concurrency and token-aware admission.
+Contextual follow-up asks about files concurrently, like initial selection: donor
+evidence is fixed before the pass, and every request revalidates its own donors
+before each attempt. A donor that changes mid-pass invalidates the requests built
+on it; those files are asked again in sequence with the evidence still current.
 
 Source selection and presentation are separate. Declaration units, comments,
 structural class headers and bounded local-call context preserve meaning without

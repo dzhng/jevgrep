@@ -10,7 +10,7 @@ import {
 
 test("preset endpoints keep their existing label, base URL, and model", () => {
   for (const provider of ["vercel", "typesafe", "openrouter", "opencode"] as const)
-    expect(endpointFor({ provider })).toEqual(providers[provider]);
+    expect(endpointFor({ provider })).toEqual({ ...providers[provider], protocol: "typesafe" });
 });
 
 test("custom endpoints resolve to the saved base URL, model, and visible host", () => {
@@ -24,7 +24,17 @@ test("custom endpoints resolve to the saved base URL, model, and visible host", 
     label: "Custom endpoint (gateway.example.com)",
     baseURL: "https://gateway.example.com/typesafe/v1",
     model: "gateway/jev-2",
+    // A record saved before protocols existed keeps the native route.
+    protocol: "typesafe",
   });
+  expect(
+    endpointFor({
+      provider: "custom",
+      baseURL: "http://localhost:11434/v1",
+      model: "llama3",
+      protocol: "openai",
+    }).protocol,
+  ).toBe("openai");
 });
 
 test("base URLs require https except for loopback development proxies", () => {
