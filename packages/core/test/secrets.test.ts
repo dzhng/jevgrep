@@ -145,3 +145,43 @@ test("scans a large single-line data file in linear time", () => {
     true,
   );
 });
+
+test("flags credential names written in camelCase", () => {
+  expect(containsLikelySecret(`var jwtSecret = "${FAKE_PASSWORD}"\n`)).toBe(true);
+  expect(containsLikelySecret(`const dbPassword = "${FAKE_PASSWORD}";\n`)).toBe(true);
+  // A longer word that merely starts with a credential word is still not a credential name.
+  expect(containsLikelySecret(`const mySecretary = "${FAKE_PASSWORD}";\n`)).toBe(false);
+});
+
+test("flags a credential declared after a type name", () => {
+  expect(
+    containsLikelySecret(`    private static final String API_KEY = "${FAKE_PASSWORD}";\n`),
+  ).toBe(true);
+  expect(containsLikelySecret(`string clientSecret = "${FAKE_PASSWORD}";\n`)).toBe(true);
+  expect(containsLikelySecret(`String apiKey = System.getenv("API_KEY");\n`)).toBe(false);
+});
+
+test("flags a credential in a YAML list item", () => {
+  // Unquoted, so no `#`: that would start a comment.
+  expect(
+    containsLikelySecret(
+      "    environment:\n      - POSTGRES_PASSWORD=k7Q2mV9xT4pL8nR3wY6bD1fH5jG0cS9a\n",
+    ),
+  ).toBe(true);
+  expect(containsLikelySecret(`users:\n  - password: "${FAKE_PASSWORD}"\n`)).toBe(true);
+  expect(containsLikelySecret("      - POSTGRES_PASSWORD=${DB_PASSWORD}\n")).toBe(false);
+});
+
+test("a credential-named field holding code, not a literal, is not a secret", () => {
+  for (const line of [
+    "  toolApprovalSecret?: string | Uint8Array;",
+    "const passwordBuffer = Buffer.from(password)",
+    "  password: z.string().optional(),",
+    "  apiKeyProvided: authMethod === 'api-key',",
+    "const secret = await mintClientSecret({",
+  ])
+    expect(containsLikelySecret(`${line}\n`)).toBe(false);
+  // The same names holding a literal still are.
+  expect(containsLikelySecret(`  password: ${FAKE_STRIPE.slice(8)},\n`)).toBe(true);
+  expect(containsLikelySecret(`const secret = "${FAKE_PASSWORD}";\n`)).toBe(true);
+});

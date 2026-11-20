@@ -6,9 +6,11 @@
  * values that look like credentials. Two independent signals:
  *
  * - Signal A: an assignment-shaped line (`KEY=value`, `key: value`,
- *   `"key": "value"`, `const key = "value"`) whose key name looks
- *   credential-ish AND whose value looks like a real secret (long,
- *   high-entropy, non-placeholder).
+ *   `"key": "value"`, `const key = "value"`, `String KEY = "value"`,
+ *   `- KEY=value`) whose key name looks credential-ish, in snake_case or
+ *   camelCase, AND whose value is a literal that looks like a real secret
+ *   (long, high-entropy, non-placeholder). An unquoted value that is a call
+ *   or several words is code or a type, not a stored secret.
  * - Signal B: a known provider key prefix (with a word-boundary guard) followed
  *   by enough key material, or a Slack webhook URL — distinctive enough to flag
  *   without assignment context.
@@ -102,12 +104,17 @@ const KEY_WORD_PATTERN =
   /api[_-]?key|client[_-]?secret|passwd|password|private[_-]?key|secret|auth[_-]?token|access[_-]?token|api[_-]?token|bearer[_-]?token/i;
 
 /**
- * Assignment shapes across .env / YAML / JSON / TOML / INI and source files, with optional quotes and declaration keywords.
+ * Assignment shapes across .env / YAML / JSON / TOML / INI and source files, with optional quotes,
+ * declaration keywords and a YAML list dash.
  * The key length is capped: `assignments` retries this at every separator, so an
  * unbounded key rescans the rest of a minified data line each time (quadratic).
  */
 const ASSIGNMENT_PATTERN =
-  /^\s*(?:(?:const|let|var|export|default|public|private|protected|static|readonly|final)\s+)*["']?([^"'=\s:]{1,256})["']?\s*[:=]\s*/;
+  /^\s*(?:-\s+)?(?:(?:const|let|var|export|default|public|private|protected|static|readonly|final)\s+)*["']?([^"'=\s:]{1,256})["']?\s*[:=]\s*/;
+
+/** A declaration whose key follows one or two type words: `String API_KEY = …`, `const char *key = …`. */
+const TYPED_ASSIGNMENT_PATTERN =
+  /^\s*(?:(?:const|let|var|export|default|public|private|protected|static|readonly|final)\s+)*(?:[A-Za-z_][\w.<>[\]]{0,63}\s+[*&]*){1,2}([A-Za-z_$][\w$]{0,255})\s*=\s*/;
 
 const PLACEHOLDER_PATTERN =
   /^(?:your|example|test|fake|dummy|sample|changeme|placeholder|redacted|masked|todo|fixme|none|null|undefined|nil|tbd)[\w-]*$|^x+$|^<.*>$|^\*+$|^\$\{[^}]*\}$|^\{\{[^}]*\}\}$/i;
@@ -198,12 +205,22 @@ function assignments(line: string): Array<{ key: string; rawValue: string }> {
     }
     if (index !== 0 && !"{,;".includes(char)) continue;
     const candidate = line.slice(index === 0 ? index : index + 1);
-    const match = ASSIGNMENT_PATTERN.exec(candidate);
+    const match = ASSIGNMENT_PATTERN.exec(candidate) ?? TYPED_ASSIGNMENT_PATTERN.exec(candidate);
     if (match?.[1] !== undefined) {
       matches.push({ key: match[1], rawValue: candidate.slice(match[0].length) });
     }
   }
   return matches;
+}
+
+/**
+ * True when an unquoted value is code rather than a stored literal: a call, or several words up
+ * to the first comma (`string | Uint8Array`, `Buffer.from(password)`, `mode === "key"`).
+ */
+function isExpression(raw: string): boolean {
+  const text = raw.trim();
+  if (text[0] === '"' || text[0] === "'" || text[0] === "`") return false;
+  return /[\s(]/.test(text.split(",")[0]!.replace(/[;}\s]+$/, ""));
 }
 
 function isPlaceholder(value: string): boolean {
@@ -299,9 +316,11 @@ export function containsLikelySecret(source: string): boolean {
     if (SLACK_WEBHOOK_PATTERN.test(trimmed)) return true;
     if (!KEY_WORD_PATTERN.test(trimmed)) continue;
     for (const assignment of assignments(trimmed)) {
-      if (!KEY_NAME_PATTERN.test(assignment.key)) continue;
+      // camelCase humps are word boundaries too: `jwtSecret` names a secret, `secretary` does not.
+      if (!KEY_NAME_PATTERN.test(assignment.key.replace(/([a-z0-9])([A-Z])/g, "$1_$2"))) continue;
       const rawValue = assignment.rawValue;
       if (hasUnclosedQuote(rawValue)) return true;
+      if (isExpression(rawValue)) continue;
       if (looksLikeSecretValue(cleanValue(rawValue))) return true;
     }
   }
