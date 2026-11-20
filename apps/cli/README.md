@@ -43,7 +43,8 @@ the key. The saved endpoint and model are part of the cache identity, so custom
 answers stay separate from the preset providers’ answers and from other endpoints.
 
 A custom base URL must contain only the scheme, host, and optional path: no
-embedded credentials, query string, or fragment. Jevgrep appends `/systemone` to
+embedded credentials, query string, or fragment. Jevgrep appends the route path
+(`/systemone`, or `/chat/completions` for the OpenAI-compatible protocol below) to
 that base URL and sends the saved key as a Bearer token.
 
 For gateway implementers, Jevgrep's boolean questions arrive as `noul` questions
@@ -65,6 +66,27 @@ Return an answer for every question ID, with a finite `noul` value between 0 and
 These answers need neither `probabilities` nor `confidence`. A server that demands
 `criteria.true` and returns HTTP 422 is incompatible with these requests. Run
 `jg doctor` against a custom gateway before searching a repository.
+
+### Any chat model that returns token logprobs
+
+A custom endpoint can instead speak OpenAI-compatible chat completions. Choose
+that protocol in `auth`, or pass `--protocol openai`:
+
+```sh
+jg auth --provider custom --protocol openai --base-url http://localhost:11434/v1 --model llama3 --stdin
+```
+
+Jevgrep then sends one chat completion per question, asking for a one-word Yes or
+No with `logprobs` and `top_logprobs`, and reads the answer's probability from the
+first token. The endpoint must return token log-probabilities: a reply without
+them, or one whose first token is neither yes nor no, is a failed request and never
+a score. Models that reason before answering, and providers that do not expose
+logprobs, are incompatible.
+
+This route costs more requests than the native one, because each question resends
+its state in its own call. Retrieval thresholds were tuned on Jev; no result in
+the [evaluation records](../../evals/README.md) covers another model, so treat
+answer quality and cost as unmeasured and start with `jg doctor`.
 
 Credentials are saved under
 `$XDG_CONFIG_HOME/jevgrep/credentials.json`, or `~/.config/jevgrep/credentials.json`.

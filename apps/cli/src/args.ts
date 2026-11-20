@@ -1,7 +1,13 @@
 import { fileTypes, parseFileTypes } from "@repo/core/file-types";
 import { parseArgs } from "node:util";
 import type { SearchInput } from "@repo/core";
-import { providers, customProviderId, isCredentialProvider } from "@repo/core/providers";
+import {
+  providers,
+  protocols,
+  customProviderId,
+  isCredentialProvider,
+  type Protocol,
+} from "@repo/core/providers";
 import { CliError } from "./errors";
 import { DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_MAX_SOURCE_BYTES } from "./render";
 import type { AuthOptions } from "./auth";
@@ -40,6 +46,7 @@ export function parseCommand(args: string[]): Command {
         provider: { type: "string" },
         "base-url": { type: "string" },
         model: { type: "string" },
+        protocol: { type: "string" },
         agent: { type: "string", multiple: true },
         global: { type: "boolean" },
         yes: { type: "boolean" },
@@ -72,7 +79,7 @@ export function parseCommand(args: string[]): Command {
   if (first === "auth") {
     if (
       positionals.length !== 1 ||
-      keys.some((key) => !["stdin", "provider", "base-url", "model"].includes(key))
+      keys.some((key) => !["stdin", "provider", "base-url", "model", "protocol"].includes(key))
     )
       throw new CliError("Usage: jg auth OR jg auth --provider NAME --stdin");
     if (!keys.length) return { kind: "auth" };
@@ -83,15 +90,24 @@ export function parseCommand(args: string[]): Command {
     if (values.provider === customProviderId) {
       if (!values["base-url"] || !values.model)
         throw new CliError("Custom endpoints need --base-url URL and --model ID with --stdin.");
+      if (values.protocol !== undefined && !protocols.includes(values.protocol as Protocol))
+        throw new CliError(`--protocol must be one of: ${protocols.join(", ")}.`);
       return {
         kind: "auth",
         provider: customProviderId,
         baseURL: values["base-url"],
         model: values.model,
+        ...(values.protocol !== undefined ? { protocol: values.protocol as Protocol } : {}),
       };
     }
-    if (values["base-url"] !== undefined || values.model !== undefined)
-      throw new CliError("--base-url and --model are only valid with --provider custom.");
+    if (
+      values["base-url"] !== undefined ||
+      values.model !== undefined ||
+      values.protocol !== undefined
+    )
+      throw new CliError(
+        "--base-url, --model and --protocol are only valid with --provider custom.",
+      );
     return { kind: "auth", provider: values.provider };
   }
   if (first === "skill") {
@@ -144,7 +160,9 @@ export function parseCommand(args: string[]): Command {
     positionals.length > 2 ||
     values.stdin ||
     values.list ||
-    keys.some((key) => ["agent", "global", "yes", "provider", "base-url", "model"].includes(key))
+    keys.some((key) =>
+      ["agent", "global", "yes", "provider", "base-url", "model", "protocol"].includes(key),
+    )
   )
     throw new CliError('Usage: jg "question" [root]. Run jg --help.');
   let concurrency: number | undefined;
@@ -240,8 +258,10 @@ Commands:
 
 Auth automation:
   auth --provider ${credentialProviders.join("|")} --stdin
-  auth --provider custom --base-url URL --model ID --stdin
+  auth --provider custom --base-url URL --model ID [--protocol ${protocols.join("|")}] --stdin
   Save one provider/key from a pipe. Re-running auth replaces your setup.
+  --protocol openai uses any chat-completions endpoint that returns token
+  logprobs; the default, typesafe, is the native route the presets use.
   Custom endpoints must use https://; http:// is allowed only for localhost
   and 127.0.0.1. Auth and doctor name the endpoint host, never the key.
   Saved credentials only; provider key/URL environment variables are ignored.

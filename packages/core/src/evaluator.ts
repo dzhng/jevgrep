@@ -1,6 +1,7 @@
 import { APICallError, experimental_evaluate as evaluate } from "ai";
 import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
-import { endpointFor, type CredentialProvider } from "./providers";
+import { endpointFor, type CredentialProvider, type Protocol } from "./providers";
+import { chatLogprobsRequest, yesProbability } from "./chat-logprobs";
 import { type createEvaluationCache, type CacheInput } from "./cache";
 import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
@@ -33,6 +34,7 @@ export function createEvaluator(options: {
   apiKey: string;
   baseURL?: string;
   model?: string;
+  protocol?: Protocol;
   cache?: ReturnType<typeof createEvaluationCache>;
   policyVersion?: string;
   fetch?: typeof fetch;
@@ -79,30 +81,103 @@ export function createEvaluator(options: {
       else active--;
     };
   }
+  /** Every HTTP attempt, on either protocol, passes the request guard and feeds the shared cooldown. */
+  const guardedFetch: typeof fetch = async (input, init) => {
+    assertActive();
+    if (requests >= (options.requestLimit ?? 50_000)) throw new EvaluationFailure("request-limit");
+    requests++;
+    const response = await (options.fetch ?? fetch)(input, init);
+    if (response.status === 429) {
+      const raw = response.headers.get("retry-after");
+      const seconds = raw === null ? NaN : Number(raw);
+      const date = raw === null ? NaN : Date.parse(raw);
+      const wait =
+        Number.isFinite(seconds) && seconds >= 0
+          ? seconds * 1000
+          : Number.isFinite(date)
+            ? Math.max(0, date - Date.now())
+            : 1000;
+      cooldownUntil = Math.max(cooldownUntil, Date.now() + wait);
+    }
+    return response;
+  };
   const provider = createTypeSafeAi({
     apiKey: options.apiKey,
     baseURL: endpoint.baseURL,
-    fetch: async (input, init) => {
-      assertActive();
-      if (requests >= (options.requestLimit ?? 50_000))
-        throw new EvaluationFailure("request-limit");
-      requests++;
-      const response = await (options.fetch ?? fetch)(input, init);
-      if (response.status === 429) {
-        const raw = response.headers.get("retry-after");
-        const seconds = raw === null ? NaN : Number(raw);
-        const date = raw === null ? NaN : Date.parse(raw);
-        const wait =
-          Number.isFinite(seconds) && seconds >= 0
-            ? seconds * 1000
-            : Number.isFinite(date)
-              ? Math.max(0, date - Date.now())
-              : 1000;
-        cooldownUntil = Math.max(cooldownUntil, Date.now() + wait);
-      }
-      return response;
-    },
+    fetch: guardedFetch,
   });
+  type Answers = { scores: Record<string, number>; inputTokens: number | undefined };
+  async function systemOne(request: EvaluationRequest, abortSignal: AbortSignal): Promise<Answers> {
+    const result = await evaluate({
+      model: provider.evaluationModel(endpoint.model),
+      ...request,
+      maxRetries: 0,
+      abortSignal,
+    });
+    const scores = Object.fromEntries(
+      Object.keys(request.questions).map((id) => {
+        const answer = result.answers[id];
+        if (
+          !answer ||
+          answer.type !== "boolean" ||
+          !Number.isFinite(answer.probability) ||
+          answer.probability < 0 ||
+          answer.probability > 1
+        )
+          throw new Error("Invalid answer");
+        return [id, answer.probability];
+      }),
+    );
+    return { scores, inputTokens: result.usage.inputTokens };
+  }
+  // ponytail: a request's questions go out together inside one concurrency slot, so in-flight
+  // calls can reach concurrency x batch size. Give each question its own slot if endpoints choke.
+  async function chatLogprobs(request: EvaluationRequest, signal: AbortSignal): Promise<Answers> {
+    const url = `${endpoint.baseURL}/chat/completions`;
+    let inputTokens = 0;
+    const entries = await Promise.all(
+      Object.entries(request.questions).map(async ([id, question]) => {
+        let response: Response;
+        try {
+          response = await guardedFetch(url, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${options.apiKey}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify(
+              chatLogprobsRequest(endpoint.model, request.state, question.instructions),
+            ),
+            signal,
+          });
+        } catch (error) {
+          const name = error instanceof Error ? error.name : "";
+          if (["EvaluationFailure", "TimeoutError", "AbortError"].includes(name)) throw error;
+          throw new APICallError({
+            message: "Network request failed",
+            url,
+            requestBodyValues: {},
+            isRetryable: true,
+            cause: error,
+          });
+        }
+        const data: unknown = await response.json().catch(() => undefined);
+        if (!response.ok)
+          throw new APICallError({
+            message: `HTTP ${response.status}`,
+            url,
+            requestBodyValues: {},
+            statusCode: response.status,
+            data,
+          });
+        const used = (data as { usage?: { prompt_tokens?: unknown } })?.usage?.prompt_tokens;
+        if (typeof used === "number") inputTokens += used;
+        return [id, yesProbability(data)] as const;
+      }),
+    );
+    return { scores: Object.fromEntries(entries), inputTokens };
+  }
+  const ask = endpoint.protocol === "openai" ? chatLogprobs : systemOne;
   return {
     get cacheHits() {
       return cacheHits;
@@ -124,7 +199,7 @@ export function createEvaluator(options: {
           model: endpoint.model,
           provider: options.provider,
           endpoint: endpoint.baseURL,
-          protocol: "typesafe-ai-3.0.8",
+          protocol: endpoint.protocol === "openai" ? "openai-chat-logprobs-1" : "typesafe-ai-3.0.8",
           policyVersion: options.policyVersion ?? "1",
           parserVersion: "tree-sitter-0.27.0-python-0.25.0-go-0.25.0-rust-0.24.0-ts-5.9.3",
           promptVersion: "unit-locators-1",
@@ -179,31 +254,15 @@ export function createEvaluator(options: {
           }
           const reservation = rateBudget?.reserve(reservedTokens);
           try {
-            const result = await evaluate({
-              model: provider.evaluationModel(endpoint.model),
-              ...request,
-              maxRetries: 0,
-              abortSignal: AbortSignal.any([
+            const { scores, inputTokens } = await ask(
+              request,
+              AbortSignal.any([
                 options.signal,
                 authenticationFailure.signal,
                 AbortSignal.timeout(timeoutMs),
               ]),
-            });
-            reservation?.reconcile(result.usage.inputTokens);
-            const scores = Object.fromEntries(
-              Object.keys(request.questions).map((id) => {
-                const answer = result.answers[id];
-                if (
-                  !answer ||
-                  answer.type !== "boolean" ||
-                  !Number.isFinite(answer.probability) ||
-                  answer.probability < 0 ||
-                  answer.probability > 1
-                )
-                  throw new Error("Invalid answer");
-                return [id, answer.probability];
-              }),
             );
+            reservation?.reconcile(inputTokens);
             await options.cache?.put(cacheInput, scores);
             return scores;
           } catch (error) {

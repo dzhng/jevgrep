@@ -131,6 +131,31 @@ test("custom auth carries an explicit base URL and model while presets reject th
     expect(() => parseCommand(args)).toThrow();
 });
 
+test("custom auth accepts a wire protocol and rejects unknown ones or presets", () => {
+  const custom = [
+    "auth",
+    "--provider",
+    "custom",
+    "--base-url",
+    "http://localhost:11434/v1",
+    "--model",
+    "llama3",
+    "--stdin",
+  ];
+  expect(parseCommand([...custom, "--protocol", "openai"])).toEqual({
+    kind: "auth",
+    provider: "custom",
+    baseURL: "http://localhost:11434/v1",
+    model: "llama3",
+    protocol: "openai",
+  });
+  expect(() => parseCommand([...custom, "--protocol", "grpc"])).toThrow();
+  expect(() =>
+    parseCommand(["auth", "--provider", "vercel", "--protocol", "openai", "--stdin"]),
+  ).toThrow();
+  expect(() => parseCommand(["question", "--protocol", "openai"])).toThrow();
+});
+
 test("concurrency is a positive search-only limit and does not change cache policy", () => {
   const command = parseCommand(["question", "--concurrency", "2"]);
   expect(command).toMatchObject({ kind: "search", concurrency: 2, policy: {} });
